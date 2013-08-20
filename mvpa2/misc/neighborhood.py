@@ -12,6 +12,7 @@
 import numpy as np
 from numpy import array
 import sys
+import json
 import itertools
 import nibabel as nib
 import networkx as nx
@@ -341,6 +342,44 @@ class HollowSphere(Sphere):
         return np.vstack([np.zeros(ndim,dtype='int'),res]) if self.include_center else res
 
 
+class JSONQueryEngine(object):
+    def __init__(self, fname, alt=None, *args, **kwargs):
+        self.fname = fname
+        self.alt = None
+        try:
+            with open(fname, 'r') as fp:
+                self.cache = json.load(fp)
+                if max(map(len, self.cache)) == 0:
+                    raise Exception("Insufficient data in cache")
+        except:
+            self.alt = alt(*args, **kwargs)
+
+    def train(self, dataset):
+        if self.alt is not None:
+            self.alt.train(dataset)
+            self.ids = self.alt.ids
+            self.cache = [[] for i in range(dataset.nfeatures)]
+        else:
+            self.ids = np.arange(dataset.nfeatures)
+            assert len(self.cache) == dataset.nfeatures
+
+    def __getitem__(self, coordinate):
+        res = self.cache[coordinate]
+
+        if res == [] and self.alt is not None:
+            res = self.alt[coordinate]
+            self.cache[coordinate] = res
+
+        return res
+
+    def save(self):
+        if not hasattr(self, 'cache') or \
+                max(map(len,self.cache)) == 0:
+            return
+        with open(self.fname, 'w') as fp:
+            json.dump(self.cache, fp)
+
+
 class SurfaceDiskQueryEngine(object):
     """Disk on a surface embedded in a higher dimensional space
 
@@ -463,7 +502,6 @@ class DoubleDiskQueryEngine(SurfaceDiskQueryEngine):
 
     @radius.setter
     def radius(self, newrad):
-        print "Setting radius in DoubleDiskQE"
         self._radius = newrad
         if self.coordinate is not None:
             self._setFirstDisk()
