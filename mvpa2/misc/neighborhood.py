@@ -12,6 +12,7 @@
 import numpy as np
 from numpy import array
 import sys
+import json
 import itertools
 import nibabel as nib
 import networkx as nx
@@ -301,6 +302,37 @@ class HollowSphere(Sphere):
         if not len(res):
             warning("%s defines no neighbors" % self)
         return res
+
+
+class JSONQueryEngine(object):
+    def __init__(self, fname, alt=None, *args, **kwargs):
+        self.fname = fname
+        self.alt = None
+        try:
+            with open(fname, 'r') as fp:
+                self.cache = json.load(fp)
+        except:
+            self.alt = alt(*args, **kwargs)
+
+    def train(self, dataset):
+        self.ids = np.arange(dataset.nfeatures)
+        if self.alt is not None:
+            self.cache = [[] for i in range(dataset.nfeatures)]
+        else:
+            assert len(self.cache) == dataset.nfeatures
+
+    def __getitem__(self, coordinate):
+        res = self.cache[coordinate]
+
+        if res == [] and self.alt is not None:
+            res = self.alt[coordinate]
+            self.cache[coordinate] = res
+
+        return res
+
+    def save(self):
+        with open(self.fname, 'w') as fp:
+            json.dump(self.cache, fp)
 
 
 class SurfaceDiskQueryEngine(object):
