@@ -355,6 +355,13 @@ class SurfaceDiskQueryEngine(object):
         self.lcoords = lcoords
         self.rcoords = rcoords
 
+        self.lvox = [set(np.nonzero(lv.samples[0] != -1)[0].tolist())
+                     for lv in lverts]
+        self.rvox = [set(np.nonzero(rv.samples[0] != -1)[0].tolist())
+                     for rv in rverts]
+        self.lvoxall = set.union(*self.lvox)
+        self.rvoxall = set.union(*self.rvox)
+
     def __repr__(self, prefixes=[]):
         return "%s(%s)" % (self.__class__.__name__, ', '.join(prefixes))
 
@@ -368,11 +375,17 @@ class SurfaceDiskQueryEngine(object):
         self._radius = newrad
 
     @classmethod
-    def loadFromFiles(cls, radius, lvtxvol, lhsurf, rvtxvol, rhsurf,
+    def loadFromFiles(cls, radius, lvtxvols, lhsurf, rvtxvols, rhsurf,
             mask=None):
+
+        if isinstance(lvtxvols, basestring):
+            lvtxvols = [lvtxvols]
+        if isinstance(rvtxvols, basestring):
+            rvtxvols = [rvtxvols]
+
         # Vertex volumes generated with Freesurfer's mri_surf2vol --vtxvol
-        lverts = fmri_dataset(lvtxvol, mask=mask)
-        rverts = fmri_dataset(rvtxvol, mask=mask)
+        lverts = [fmri_dataset(vol, mask=mask) for vol in lvtxvols]
+        rverts = [fmri_dataset(vol, mask=mask) for vol in rvtxvols]
 
         # Standard freesurfer [lr]h.* files
         lcoords, lfaces = nib.freesurfer.read_geometry(lhsurf)
@@ -399,24 +412,32 @@ class SurfaceDiskQueryEngine(object):
         self.ids = np.arange(dataset.nfeatures)
 
     def __getitem__(self, coordinate):
-        if self.lverts.samples[0, coordinate] != -1:
-            verts = self.lverts.samples[0]
+        if coordinate in self.lvoxall:
             graph = self.lgraph
-        elif self.rverts.samples[0, coordinate] != -1:
-            verts = self.rverts.samples[0]
+            vertices = self.lverts
+            for verts, voxels in zip(self.lverts, self.lvox):
+                if coordinate in voxels:
+                    source = verts.samples[0, coordinate]
+                    break
+        elif coordinate in self.rvoxall:
             graph = self.rgraph
+            vertices = self.rverts
+            for verts, voxels in zip(self.rverts, self.rvox):
+                if coordinate in voxels:
+                    source = verts.samples[0, coordinate]
+                    break
         else:
             # XXX BIG ASSUMPTION
             # Index 0 will never be informative
             return [0]
 
-        source = verts[coordinate]
         disk = nx.single_source_dijkstra_path_length(graph, source,
                                                      self._radius)
 
-        idcs = [i for i, v in enumerate(verts) if v in disk]
+        idcs = set.union(*[set(i for i, v in enumerate(vert.samples[0])
+                               if v in disk) for vert in vertices])
 
-        return idcs
+        return sorted(idcs)
 
 
 class DoubleDiskQueryEngine(SurfaceDiskQueryEngine):
