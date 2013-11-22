@@ -311,14 +311,18 @@ class JSONQueryEngine(object):
         try:
             with open(fname, 'r') as fp:
                 self.cache = json.load(fp)
+                if max(map(len, self.cache)) == 0:
+                    raise Exception("Insufficient data in cache")
         except:
             self.alt = alt(*args, **kwargs)
 
     def train(self, dataset):
-        self.ids = np.arange(dataset.nfeatures)
         if self.alt is not None:
+            self.alt.train(dataset)
+            self.ids = self.alt.ids
             self.cache = [[] for i in range(dataset.nfeatures)]
         else:
+            self.ids = np.arange(dataset.nfeatures)
             assert len(self.cache) == dataset.nfeatures
 
     def __getitem__(self, coordinate):
@@ -331,6 +335,9 @@ class JSONQueryEngine(object):
         return res
 
     def save(self):
+        if not hasattr(self, 'cache') or \
+                max(map(len,self.cache)) == 0:
+            return
         with open(self.fname, 'w') as fp:
             json.dump(self.cache, fp)
 
@@ -457,7 +464,6 @@ class DoubleDiskQueryEngine(SurfaceDiskQueryEngine):
 
     @radius.setter
     def radius(self, newrad):
-        print "Setting radius in DoubleDiskQE"
         self._radius = newrad
         if self.coordinate is not None:
             self._setFirstDisk()
