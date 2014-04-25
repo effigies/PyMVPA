@@ -6,7 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Implementation of the Searchlight algorithm"""
+"""Searchlight implementation for arbitrary measures and spaces"""
 
 __docformat__ = 'restructuredtext'
 
@@ -15,12 +15,14 @@ if __debug__:
 
 import numpy as np
 import tempfile, os
+import time
 
 import mvpa2
 from mvpa2.base import externals, warning
 from mvpa2.base.types import is_datasetlike
 from mvpa2.base.dochelpers import borrowkwargs, _repr_attrs
 from mvpa2.base.types import is_datasetlike
+from mvpa2.base.progress import ProgressBar
 if externals.exists('h5py'):
     # Is optionally required for passing searchlight
     # results via storing/reloading hdf5 files
@@ -155,7 +157,7 @@ class BaseSearchlight(Measure):
                 #
                 # THe original code was:
                 # mapper.append(StaticFeatureSelection(roi_ids,
-                #                                     dshape=dataset.shape[1:])) 
+                #                                     dshape=dataset.shape[1:]))
                 feat_sel_mapper = StaticFeatureSelection(roi_ids,
                                                      dshape=dataset.shape[1:])
                 if 'append' in dir(mapper):
@@ -168,11 +170,6 @@ class BaseSearchlight(Measure):
 
         # charge state
         self.ca.raw_results = results
-
-        # store the center ids as a feature attribute
-        results.fa['center_ids'] = roi_ids
-
-
         # return raw results, base-class will take care of transformations
         return results
 
@@ -230,10 +227,35 @@ class Searchlight(BaseSearchlight):
         if sl.ca.is_enabled('roi_center_ids'):
             sl.ca.roi_center_ids = [r.a.roi_center_ids for r in results]
 
+        if 'mapper' in dataset.a:
+            # since we know the space we can stick the original mapper into the
+            # results as well
+            if roi_ids is None:
+                result_ds.a['mapper'] = copy.copy(dataset.a.mapper)
+            else:
+                # there is an additional selection step that needs to be
+                # expressed by another mapper
+                mapper = copy.copy(dataset.a.mapper)
+
+                # NNO if the orignal mapper has no append (because it's not a
+                # chainmapper, for example), we make our own chainmapper.
+                feat_sel_mapper = StaticFeatureSelection(
+                                    roi_ids, dshape=dataset.shape[1:])
+                if hasattr(mapper, 'append'):
+                    mapper.append(feat_sel_mapper)
+                else:
+                    mapper = ChainMapper([dataset.a.mapper,
+                                          feat_sel_mapper])
+
+                result_ds.a['mapper'] = mapper
+
+        # store the center ids as a feature attribute
+        result_ds.fa['center_ids'] = roi_ids
+
         return result_ds
 
-
     def __init__(self, datameasure, queryengine, add_center_fa=False,
+                 results_postproc_fx=None,
                  results_backend='native',
                  results_fx=None,
                  tmp_prefix='tmpsl',
@@ -251,6 +273,10 @@ class Searchlight(BaseSearchlight):
           seed (e.g. sphere center) for the respective ROI. If True, the
           attribute is named 'roi_seed', the provided string is used as the name
           otherwise.
+        results_postproc_fx : callable
+          Called with all the results computed in a block for possible
+          post-processing which needs to be done in parallel instead of serial
+          aggregation in results_fx.
         results_backend : ('native', 'hdf5'), optional
           Specifies the way results are provided back from a processing block
           in case of nproc > 1. 'native' is pickling/unpickling of results by
@@ -275,6 +301,7 @@ class Searchlight(BaseSearchlight):
         """
         BaseSearchlight.__init__(self, queryengine, **kwargs)
         self.datameasure = datameasure
+        self.results_postproc_fx = results_postproc_fx
         self.results_backend = results_backend.lower()
         if self.results_backend == 'hdf5':
             # Assure having hdf5
@@ -295,6 +322,7 @@ class Searchlight(BaseSearchlight):
             prefixes=prefixes
             + _repr_attrs(self, ['datameasure'])
             + _repr_attrs(self, ['add_center_fa'], default=False)
+            + _repr_attrs(self, ['results_postproc_fx'])
             + _repr_attrs(self, ['results_backend'], default='native')
             + _repr_attrs(self, ['results_fx', 'nblocks'])
             )
@@ -380,6 +408,7 @@ class Searchlight(BaseSearchlight):
             debug_slc_ = 'SLC_' in debug.active
             debug('SLC',
                   "Starting computing block for %i elements" % len(block))
+            start_time = time.time()
         results = []
         store_roi_feature_ids = self.ca.is_enabled('roi_feature_ids')
         store_roi_sizes = self.ca.is_enabled('roi_sizes')
@@ -391,6 +420,8 @@ class Searchlight(BaseSearchlight):
 
         # put rois around all features in the dataset and compute the
         # measure within them
+        bar = ProgressBar()
+
         for i, f in enumerate(block):
             # retrieve the feature ids of all features in the ROI from the query
             # engine
@@ -439,12 +470,19 @@ class Searchlight(BaseSearchlight):
             results.append(res)
 
             if __debug__:
-                debug('SLC', "Doing %i ROIs: %i (%i features) [%i%%]" \
-                    % (len(block),
-                       f + 1,
-                       roi.nfeatures,
-                       float(i + 1) / len(block) * 100,), cr=True)
+                msg = 'ROI %i (%i/%i), %i features' % \
+                            (f + 1, i + 1, len(block), roi.nfeatures)
+                debug('SLC', bar(float(i + 1) / len(block), msg), cr=True)
 
+        if __debug__:
+            # just to get to new line
+            debug('SLC', '')
+
+        if self.results_postproc_fx:
+            if __debug__:
+                debug('SLC', "Post-processing %d results in proc_block using %s"
+                      % (len(results), self.results_postproc_fx))
+            results = self.results_postproc_fx(results)
         if self.results_backend == 'native':
             pass                        # nothing special
         elif self.results_backend == 'hdf5':

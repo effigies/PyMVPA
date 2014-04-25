@@ -6,7 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Base classes for measures: algorithms that quantify properties of datasets.
+"""Plumbing for measures: algorithms that quantify properties of datasets.
 
 Besides the `Measure` base class this module also provides the
 (abstract) `FeaturewiseMeasure` class. The difference between a general
@@ -33,7 +33,7 @@ from mvpa2.base.types import asobjarray
 from mvpa2.base.dochelpers import enhanced_doc_string, _str, _repr_attrs
 from mvpa2.base import externals, warning
 from mvpa2.clfs.stats import auto_null_dist
-from mvpa2.base.dataset import AttrDataset
+from mvpa2.base.dataset import AttrDataset, vstack
 from mvpa2.datasets import Dataset, vstack, hstack
 from mvpa2.mappers.fx import BinaryFxNode
 from mvpa2.generators.splitters import Splitter
@@ -121,9 +121,16 @@ class Measure(Learner):
     def _postcall(self, dataset, result):
         """Some postprocessing on the result
         """
-        # post-processing
-        result = super(Measure, self)._postcall(dataset, result)
-        if not self.__null_dist is None:
+        if self.__null_dist is None:
+            # do base-class postcall and be done
+            result = super(Measure, self)._postcall(dataset, result)
+        else:
+            # don't do a full base-class postcall, only do the
+            # postproc-application here, to gain result compatibility with the
+            # fitted null distribution -- necessary to be able to use
+            # a Node's 'pass_attr' to pick up ca.null_prob
+            result = self._apply_postproc(dataset, result)
+
             if self.ca.is_enabled('null_t'):
                 # get probability under NULL hyp, but also request
                 # either it belong to the right tail
@@ -164,7 +171,8 @@ class Measure(Learner):
                 # get probability of result under NULL hypothesis if available
                 # and don't request tail information
                 self.ca.null_prob = self.__null_dist.p(result)
-
+            # now do the second half of postcall and invoke pass_attr
+            result = self._pass_attr(dataset, result)
         return result
 
 
@@ -343,9 +351,9 @@ class RepeatedMeasure(Measure):
 
         # stack all results into a single Dataset
         if concat_as == 'samples':
-            results = vstack(results)
+            results = vstack(results, True)
         elif concat_as == 'features':
-            results = hstack(results)
+            results = hstack(results, True)
         else:
             raise ValueError("Unkown concatenation mode '%s'" % concat_as)
         # no need to store the raw results, since the Measure class will
@@ -497,7 +505,16 @@ class CrossValidation(RepeatedMeasure):
                 # create empty stats container of matching type
                 ca.training_stats = node.ca['training_stats'].value.__class__()
             # harvest summary stats
-            ca['training_stats'].value.__iadd__(node.ca['training_stats'].value)
+            training_stats = node.ca['training_stats'].value
+            if isinstance(training_stats, dict):
+                # if it was a dictionary of results - we should collect them per item
+                for k,v in training_stats.iteritems():
+                    if not len(ca['training_stats'].value) or k not in ca['training_stats'].value:
+                        ca['training_stats'].value[k] = v
+                    else:
+                        ca['training_stats'].value[k].__iadd__(v)
+            else:
+                ca['training_stats'].value.__iadd__(node.ca['training_stats'].value)
 
         return result
 
@@ -625,7 +642,6 @@ class TransferMeasure(Measure):
                 warning("'training_stats' conditional attribute was enabled, "
                         "but the assigned measure '%s' either doesn't support "
                         "it, or it is disabled" % measure)
-
         return res
 
     measure = property(fget=lambda self:self.__measure)
@@ -873,14 +889,11 @@ class CombinedFeaturewiseMeasure(FeaturewiseMeasure):
 
         sa_attr = self._sa_attr
         if isinstance(sensitivities[0], AttrDataset):
-            smerged = None
+            smerged = []
             for i, s in enumerate(sensitivities):
                 s.sa[sa_attr] = np.repeat(i, len(s))
-                if smerged is None:
-                    smerged = s
-                else:
-                    smerged.append(s)
-            sensitivities = smerged
+                smerged.append(s)
+            sensitivities = vstack(smerged)
         else:
             sensitivities = \
                 Dataset(sensitivities,

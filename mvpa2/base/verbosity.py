@@ -97,7 +97,10 @@ class Logger(object):
         """
 
         if args is not None:
-            msg = msg % args
+            try:
+                msg = msg % args
+            except Exception as e:
+                msg = "%s [%% FAILED due to %s]" % (msg, e)
 
         if 'msgargs' in kwargs:
             msg = msg % kwargs['msgargs']
@@ -409,6 +412,10 @@ if __debug__:
         """
         rss, vms = [parse_status(field=x, value_only=True)
                   for x in ['VmRSS', 'VmSize']]
+        if rss is None or vms is None:
+            # So not available on this system -- signal with negatives
+            # but do not crash
+            return (-1, -1)
         if rss[-3:] == vms[-3:] and rss[-3:] == ' kB':
             # the same units
             rss = int(rss[:-3])                # strip from rss

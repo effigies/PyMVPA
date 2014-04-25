@@ -34,6 +34,7 @@ __sdebug('base')
 from mvpa2.base import *
 from mvpa2.base.attributes import *
 from mvpa2.base.collections import *
+from mvpa2.base.constraints import *
 from mvpa2.base.config import *
 from mvpa2.base.dataset import *
 from mvpa2.base.externals import *
@@ -44,6 +45,7 @@ from mvpa2.base.param import *
 from mvpa2.base.state import *
 from mvpa2.base.node import *
 from mvpa2.base.learner import *
+from mvpa2.base.progress import *
 
 __sdebug('h5py')
 if externals.exists('h5py'):
@@ -162,6 +164,12 @@ if externals.exists('mdp'):
     from mvpa2.mappers.mdp_adaptor import *
 if externals.exists('mdp ge 2.4'):
     from mvpa2.mappers.lle import *
+if externals.exists('nipy'):
+    from mvpa2.mappers.glm.nipy_glm import *
+if externals.exists('statsmodels'):
+    from mvpa2.mappers.glm.statsmodels_glm import *
+
+
 
 __sdebug('measures')
 from mvpa2 import measures
@@ -204,6 +212,7 @@ if externals.exists("nibabel"):
     from mvpa2.misc.fsl.melodic import *
 
 if externals.exists("pylab"):
+    from mvpa2.viz import *
     from mvpa2.misc.plot import *
     from mvpa2.misc.plot.erp import *
     if externals.exists(['griddata', 'scipy']):
@@ -216,9 +225,9 @@ if externals.exists("pylab"):
 
 __sdebug("scipy dependents")
 if externals.exists("scipy"):
-    from mvpa2.support.stats import scipy
+    from mvpa2.support.scipy.stats import scipy
     from mvpa2.measures.corrcoef import *
-    from mvpa2.measures.ds import *
+    from mvpa2.measures.rsa import *
     from mvpa2.clfs.ridge import *
     from mvpa2.clfs.plr import *
     from mvpa2.misc.stats import *
@@ -239,14 +248,21 @@ if externals.exists("lxml") and externals.exists("nibabel"):
 
 __sdebug("surface searchlight")
 from mvpa2.misc.surfing.queryengine import SurfaceVerticesQueryEngine, \
+                                           SurfaceVoxelsQueryEngine, \
                                             disc_surface_queryengine
 
-from mvpa2.misc.surfing import surf_voxel_selection, volgeom, volsurf
+from mvpa2.misc.surfing import surf_voxel_selection, volgeom, \
+                                volsurf, volume_mask_dict
+
+from mvpa2.misc.surfing.volume_mask_dict import VolumeMaskDictionary
 
 __sdebug("nibabel afni")
 from mvpa2.support.nibabel import afni_niml_dset, afni_suma_1d, \
-                                    afni_suma_spec, surf_fs_asc, surf, \
-				    surf_caret, afni_niml_roi, afni_niml_annot
+                                  afni_suma_spec, surf_fs_asc, surf, \
+				                  surf_caret, \
+                                  afni_niml_roi, afni_niml_annot
+if externals.exists('nibabel'):
+    from mvpa2.support.nibabel import surf_gifti
 
 
 __sdebug("ipython goodies")
@@ -257,11 +273,11 @@ if externals.exists("running ipython env"):
     except Exception, e:
         warning("Failed to activate custom IPython completions due to %s" % e)
 
-def suite_stats():
+def suite_stats(scope_dict={}):
     """Return cruel dict of things which evil suite provides
     """
 
-    glbls = globals()
+    scope_dict = scope_dict or globals()
     import types
     # Compatibility layer for Python3
     try:
@@ -351,6 +367,6 @@ def suite_stats():
                         pass
             return s
 
-    return EnvironmentStatistics(globals())
+    return EnvironmentStatistics(scope_dict)
 
 __sdebug("THE END of mvpa2.suite imports")

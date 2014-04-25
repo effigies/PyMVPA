@@ -292,7 +292,7 @@ class StatsTestsScipy(unittest.TestCase):
     @reseed_rng()
     def test_scipy_fit_2fparams(self):
         # fixing parameters was not before this version
-        skip_if_no_external('scipy', min_version='0.8.0')
+        skip_if_no_external('scipy', min_version='0.8.1')
         t = scipy.stats.t
         d = t(10, 1, 10).rvs(10)
         params = t.fit(d, floc=1, fscale=10.)
@@ -391,7 +391,7 @@ class StatsTestsScipy(unittest.TestCase):
         glm = GLM(X, voi=[1, 0])
         contrast = glm(data)
         assert_array_almost_equal(contrast.samples[0], tstats.samples[0])
-        assert_equals(len(contrast), 5)
+        assert_equals(len(contrast), 6)
         # we should be able to recover the approximate effect size of the signal
         # which is constructed with a baseline offset of 2 (see above)
         if cfg.getboolean('tests', 'labile', default='yes'):
@@ -423,11 +423,12 @@ class StatsTestsScipy(unittest.TestCase):
         pass
 
 
-def suite():
+def suite():  # pragma: no cover
     """Create the suite"""
     return unittest.makeSuite(StatsTestsScipy)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     import runner
+    runner.run()
 

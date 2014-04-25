@@ -29,7 +29,7 @@ class MEGTests(unittest.TestCase):
 
         # Use this whenever we fully switch to nose to run tests
         #skip_if_no_external('gzip')
-        _, fn = tempfile.mkstemp('eeglab.txt', 'eeglab')
+        fd, fn = tempfile.mkstemp('eeglab.txt', 'eeglab'); os.close(fd)
         with open(fn, 'w') as f:
             f.write(data)
 
@@ -59,9 +59,10 @@ class MEGTests(unittest.TestCase):
         assert_array_equal(sel_chan.channelids, ['Fpz', 'Pz'])
 
 
-def suite():
+def suite():  # pragma: no cover
     return unittest.makeSuite(MEGTests)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     import runner
+    runner.run()

@@ -16,7 +16,7 @@ from mvpa2.testing.datasets import *
 
 from mvpa2.base import externals, warning
 from mvpa2.base.node import ChainNode, CombinedNode
-from mvpa2.datasets.base import Dataset
+from mvpa2.datasets.base import Dataset, AttrDataset
 from mvpa2.featsel.base import SensitivityBasedFeatureSelection, \
         CombinedFeatureSelection
 from mvpa2.featsel.helpers import FixedNElementTailSelector, \
@@ -57,6 +57,7 @@ if externals.exists('scipy'):
                            # that one is good when small... handle later
                            #CorrCoef(pvalue=True)
                            ]
+    from mvpa2.featsel.base import SplitSamplesProbabilityMapper
 
 class SensitivityAnalysersTests(unittest.TestCase):
 
@@ -525,12 +526,11 @@ class SensitivityAnalysersTests(unittest.TestCase):
 
 
     def test_repeated_features(self):
-        print self.dataset
-        print self.dataset.fa.nonbogus_targets
         class CountFeatures(Measure):
             is_trained = True
             def _call(self, ds):
-                return ds.nfeatures
+                return Dataset([ds.nfeatures],
+                                fa={'nonbogus_targets': list(ds.fa['nonbogus_targets'].unique)})
 
         cf = CountFeatures()
         spl = Splitter('fa.nonbogus_targets')
@@ -539,7 +539,22 @@ class SensitivityAnalysersTests(unittest.TestCase):
         rm = RepeatedMeasure(cf, spl, concat_as='features')
         res = rm(self.dataset)
         assert_equal(res.shape, (1, nsplits))
-        assert_array_equal(res.samples[0], [18, 1, 1])
+        # due to https://github.com/numpy/numpy/issues/641 we are
+        # using list(set(...)) construct and there order of
+        # nonbogus_targets.unique can vary from run to run, thus there
+        # is no guarantee that we would get 18 first, which is a
+        # questionable assumption anyways, thus performing checks
+        # which do not require any specific order.
+        # And yet due to another issue
+        # https://github.com/numpy/numpy/issues/3759
+        # we can't just == None for the bool mask
+        None_fa = np.array([x == None for x in  res.fa.nonbogus_targets])
+        assert_array_equal(res.samples[0, None_fa], [18])
+        assert_array_equal(res.samples[0, ~None_fa], [1, 1])
+
+        if sys.version_info[0] < 3:
+            # with python2 order seems to be consistent
+            assert_array_equal(res.samples[0], [18, 1, 1])
 
     def test_custom_combined_selectors(self):
         """Test combination of the selectors in a single function
@@ -574,10 +589,66 @@ class SensitivityAnalysersTests(unittest.TestCase):
             assert_true(combined(ds).shape[i] == 2)
             assert_true(combined(ds).shape[1 - i] == ds.shape[1 - i])
 
+    def test_split_samples_probability_mapper(self):
+        skip_if_no_external('scipy')
+        nf = 10
+        ns = 100
+        nsubj = 5
+        nchunks = 5
+        data = np.random.normal(size=(ns, nf))
+        ds = AttrDataset(data, sa=dict(sidx=np.arange(ns),
+                                    targets=np.arange(ns) % nchunks,
+                                    chunks=np.floor(np.arange(ns) * nchunks / ns),
+                                    subjects=np.arange(ns) / (ns / nsubj / nchunks) % nsubj),
+                            fa=dict(fidx=np.arange(nf)))
+        analyzer = OneWayAnova()
+        element_selector = FractionTailSelector(.4, mode='select', tail='upper')
+        common = True
+        m = SplitSamplesProbabilityMapper(analyzer, 'subjects', probability_label='fprob',
+                            select_common_features=common,
+                            selector=element_selector)
 
-def suite():
+        m.train(ds)
+        y = m(ds)
+        z = m(ds.samples)
+
+        assert_array_equal(z, y.samples)
+        assert_equal(y.shape, (100, 4))
+
+
+    def test_pass_attr(self):
+        from mvpa2.base.node import Node
+        from mvpa2.base.state import ConditionalAttribute
+
+        ds = datasets['dumbinv']
+
+        class MyNode(Node):
+            some_sa = ConditionalAttribute(enabled=True)
+            some_fa = ConditionalAttribute(enabled=True)
+            some_complex = ConditionalAttribute(enabled=True)
+            def _call(self, ds):
+                return Dataset(np.zeros(ds.shape))
+        node = MyNode(pass_attr=['ca.some_sa',
+                                 ('ca.some_fa', 'fa'),
+                                 ('ca.some_complex', 'fa', 1, 'transposed'),
+                                 'sa.targets'])
+        node.ca.some_sa = np.arange(len(ds))
+        node.ca.some_fa = np.arange(ds.nfeatures)
+        node.ca.some_complex = ds.samples
+        res = node(ds)
+        assert_true('some_sa' in res.sa)
+        assert_true('some_fa' in res.fa)
+        assert_true('transposed' in res.fa)
+        assert_true('targets' in res.sa)
+        # view on original array
+        assert_true(res.fa.transposed.base is ds.samples)
+        assert_array_equal(res.fa.transposed.T, ds.samples)
+
+
+def suite():  # pragma: no cover
     return unittest.makeSuite(SensitivityAnalysersTests)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     import runner
+    runner.run()
