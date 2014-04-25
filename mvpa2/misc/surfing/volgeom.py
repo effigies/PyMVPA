@@ -9,8 +9,8 @@
 '''
 Volume geometry to map between world and voxel coordinates.
 
-Supports conversion between linear and sub indexing of voxels. 
-The rationale is that volumes use sub indexing that incorporate the spatial 
+Supports conversion between linear and sub indexing of voxels.
+The rationale is that volumes use sub indexing that incorporate the spatial
 locations of voxels, but for voxel selection (and subsequent MVPA) it is
 often more appropriate to abstract from the temporal locations of voxels.
 
@@ -44,19 +44,19 @@ class VolGeom(object):
         shape: tuple
             Number of values in each dimension.
             Typically the first three dimensions are spatial and the remaining ones
-            temporal.
+            temporal. Only the first three dimensions are stored
         affine: numpy.ndarray
             4x4 affine transformation array that maps voxel to world coordinates.
         mask: numpy.ndarray (default: None)
-            voxel mask that indicates which voxels are included. Values of zero in 
-            mask mean that a voxel is not included. If mask is None, then all 
+            voxel mask that indicates which voxels are included. Values of zero in
+            mask mean that a voxel is not included. If mask is None, then all
             voxels are included.
-        
+
         '''
         if not type(shape) is tuple or len(shape) < 3:
             raise ValueError("Shape should be a tuple with at least 3 values")
 
-        self._shape = shape
+        self._shape = (shape[0], shape[1], shape[2])
         self._affine = np.asarray(affine)
 
         if self._affine.shape != (4, 4):
@@ -74,12 +74,12 @@ class VolGeom(object):
 
     def same_geometry(self, other):
         '''Compares this geometry with another instance
-        
+
         Parameters
         ----------
         other: VolGeom
             instance to which the current instance is compared
-            
+
         Returns
         -------
         same: boolean
@@ -91,12 +91,12 @@ class VolGeom(object):
 
     def same_shape(self, other):
         '''Compares the shape of the spatial dimensions with another instance
-        
+
         Parameters
         ----------
         other: VolGeom
             instance to which the current instance is compared
-            
+
         Returns
         -------
         same: boolean
@@ -105,26 +105,16 @@ class VolGeom(object):
         if not isinstance(other, self.__class__):
             return False
 
-        p, q = self.shape, other.shape
-
-        if p == q:
-            return True
-
-        if len(p) == 3 and len(q) > 3:
-            return p == q[:3]
-        elif len(p) > 3 and len(q) == 3:
-            return p[:3] == q
-        else:
-            return False
+        return self.shape == other.shape
 
     def same_mask(self, other):
         '''Compares the mask with another instance
-        
+
         Parameters
         ----------
         other: VolGeom
             instance to which the current instance is compared
-            
+
         Returns
         -------
         same: boolean
@@ -160,21 +150,23 @@ class VolGeom(object):
 
     def __str__(self):
         sh = self.shape[:3]
-        s = '%s, %s = %d voxels' % (self.__class__.__name__,
+        s = '%s(%s = %d voxels' % (self.__class__.__name__,
                              '%d x %d x %d' % sh, self.nvoxels)
         if not self.mask is None:
             s += ', %d voxels survive the mask' % self.nvoxels_mask
+
+        s += ')'
         return s
 
 
     def as_pickable(self):
         '''
         Returns a pickable instance.
-        
+
         Returns
         -------
         dict
-            A dictionary that contains all information from this instance 
+            A dictionary that contains all information from this instance
             (and can be saved using pickle).
         '''
         d = dict(shape=self.shape, affine=self.affine, mask=self.mask)
@@ -187,7 +179,7 @@ class VolGeom(object):
     def mask(self):
         '''
         Returns the mask.
-        
+
         Returns
         -------
         mask: np.ndarray
@@ -204,7 +196,7 @@ class VolGeom(object):
     @property
     def linear_mask(self):
         '''Returns the mask as a vector
-        
+
         Returns
         -------
         mask: np.ndarray (vector with P values)
@@ -234,15 +226,15 @@ class VolGeom(object):
         '''helper function to see if ijk and lin indices are in the volume.
         It is assumed that these indices are matched (i.e. ijk[i,:] and lin[i]
         refer to the same voxel, for all i).
-        
+
         The rationale for providing both is that ijk is necessary to determine
-        whether a voxel is within the volume, while lin is necessary for 
+        whether a voxel is within the volume, while lin is necessary for
         considering which voxels are in the mask'''
         invol = self._contains_ijk_unmasked(ijk)
         invol[np.logical_or(lin < 0, lin >= self.nvoxels)] = np.False_
         invol[np.isnan(lin)] = np.False_
 
-        if apply_mask and not self.mask is None:
+        if apply_mask and not self.mask is None and invol.size:
             invol[invol] = np.logical_and(invol[invol], self.mask[lin[invol]])
 
         return np.logical_not(invol)
@@ -261,11 +253,11 @@ class VolGeom(object):
 
     def _lin2ijk_unmasked(self, lin):
         '''Converts sub to linear voxel indices
-        
+
         Parameters
         ----------
             Px1 array with linear voxel indices
-            
+
         Returns
         -------
         ijk: numpy.ndarray
@@ -273,9 +265,10 @@ class VolGeom(object):
         '''
 
         if not isinstance(lin, np.ndarray):
-            lin = np.asarray(lin, dtype=np.int)
+            lin = np.asarray(lin, dtype=np.int_)
         else:
-            lin = np.copy(lin)
+            lin = lin.astype(np.int_)
+
         lin = lin.ravel()
 
         n = np.shape(lin)[0]
@@ -283,7 +276,7 @@ class VolGeom(object):
 
         ijk = np.zeros((n, 3), dtype=int)
         for i, f in enumerate(fs):
-            v = lin / f
+            v = lin // f
             ijk[:, i] = v[:]
             lin -= v * f
 
@@ -291,12 +284,12 @@ class VolGeom(object):
 
     def ijk2triples(self, ijk):
         '''Converts sub indices to a list of triples
-        
+
         Parameters
         ----------
         ijk: np.ndarray (Px3)
             sub indices
-            
+
         Returns
         -------
         triples: list with P triples
@@ -307,11 +300,11 @@ class VolGeom(object):
 
     def triples2ijk(self, tuples):
         '''Converts triples to sub indices
-        
+
         Parameters
         ----------
         triples: list with P triples
-        
+
         Returns
         -------
         ijk: np.ndarray(Px3)
@@ -322,12 +315,12 @@ class VolGeom(object):
 
     def ijk2lin(self, ijk):
         '''Converts sub to linear voxel indices.
-        
+
         Parameters
         ----------
         ijk: numpy.ndarray
             Px3 array with sub voxel indices.
-        
+
         Returns
         -------
         lin: Px1 array with linear voxel indices.
@@ -342,11 +335,11 @@ class VolGeom(object):
 
     def lin2ijk(self, lin):
         '''Converts sub to linear voxel indices.
-        
+
         Parameters
         ----------
             Px1 array with linear voxel indices.
-            
+
         Returns
         -------
         ijk: numpy.ndarray
@@ -364,7 +357,7 @@ class VolGeom(object):
     @property
     def affine(self):
         '''Returns the affine transformation matrix.
-        
+
         Returns
         -------
         affine : numpy.ndarray
@@ -378,12 +371,12 @@ class VolGeom(object):
 
     def xyz2ijk(self, xyz):
         '''Maps world coordinates to sub voxel indices.
-        
+
         Parameters
         ----------
         xyz : numpy.ndarray (float)
             Px3 array with world coordinates.
-        
+
         Returns
         -------
         ijk: numpy.ndarray (int)
@@ -407,12 +400,12 @@ class VolGeom(object):
 
     def ijk2xyz(self, ijk):
         '''Maps sub voxel indices to world coordinates.
-        
+
         Parameters
         ----------
         ijk: numpy.ndarray (int)
             Px3 array with sub voxel indices.
-        
+
         Returns
         -------
         xyz : numpy.ndarray (float)
@@ -435,12 +428,12 @@ class VolGeom(object):
 
     def xyz2lin(self, xyz):
         '''Maps world coordinates to linear voxel indices.
-        
+
         Parameters
         ----------
         xyz : numpy.ndarray (float)
             Px3 array with world coordinates
-        
+
         Returns
         -------
         ijk: numpy.ndarray (int)
@@ -451,12 +444,12 @@ class VolGeom(object):
 
     def lin2xyz(self, lin):
         '''Maps linear voxel indices to world coordinates.
-        
+
         Parameters
         ----------
         ijk: numpy.ndarray (int)
             Px3 array with linear voxel indices.
-        
+
         Returns
         -------
         xyz : np.ndarray (float)
@@ -468,14 +461,14 @@ class VolGeom(object):
 
     def apply_affine3(self, mat, v):
         '''Applies an affine transformation matrix.
-        
+
         Parameters
         ----------
         mat : numpy.ndarray (float)
             Matrix with size at least 3x4
         v : numpy.ndarray (float)
             Px3 values to which transformation is applied
-        
+
         Returns
         -------
         w : numpy.ndarray(float)
@@ -488,21 +481,10 @@ class VolGeom(object):
         return np.dot(v, r) + t
 
     @property
-    def ntimepoints(self):
-        '''
-        Returns the number of time points.
-        
-        Returns
-        -------
-        nt: int
-            Number of time points
-        '''
-        return np.prod(self.shape[3:])
-    @property
     def nvoxels(self):
         '''
         Returns the number of voxels.
-        
+
         Returns
         -------
         nv: int
@@ -514,7 +496,7 @@ class VolGeom(object):
     def shape(self):
         '''
         Returns the shape.
-        
+
         Returns
         -------
         sh: tuple of int
@@ -537,12 +519,12 @@ class VolGeom(object):
         '''
         Returns whether a set of sub voxel indices are contained
         within this instance.
-        
+
         Parameters
         ----------
         ijk : numpy.ndarray
             Px3 array with sub voxel indices
-        
+
         Returns
         -------
         numpy.ndarray (boolean)
@@ -561,12 +543,12 @@ class VolGeom(object):
         '''
         Returns whether a set of linear voxel indices are contained
         within this instance.
-        
+
         Parameters
         ----------
         lin : numpy.ndarray
             Px1 array with linear voxel indices.
-        
+
         Returns
         -------
         numpy.ndarray (boolean)
@@ -582,7 +564,7 @@ class VolGeom(object):
     def get_empty_array(self, nt=None):
         '''
         Returns an empty array with size according to the volume
-        
+
         Parameters
         ----------
         nt: int or None
@@ -590,7 +572,7 @@ class VolGeom(object):
             same value (1 if in the mask, 0 otherwise) for each
             sample. If nt is None, then the output is 3D; otherwise
             it is 4D with 'nt' values in the last dimension.
-        
+
         Returns
         -------
         arr: numpy.ndarray
@@ -607,7 +589,7 @@ class VolGeom(object):
     def get_empty_nifti_image(self, nt=None):
         '''
         Returns an empty nifti image with size according to the volume
-        
+
         Parameters
         ----------
         nt: int or None
@@ -615,7 +597,7 @@ class VolGeom(object):
             same value (1 if in the mask, 0 otherwise) for each
             sample. If nt is None, then the output is 3D; otherwise
             it is 4D with 'nt' values in the last dimension.
-        
+
         Returns
         -------
         arr: nibabel.Nifti1Image
@@ -627,7 +609,7 @@ class VolGeom(object):
 
     def get_masked_array(self, nt=None, dilate=None):
         '''Provides a masked numpy array
-        
+
         Parameters
         ----------
         nt: int or None
@@ -637,21 +619,21 @@ class VolGeom(object):
             it is 4D with 'nt' values in the last dimension.
         dilate: callable or int or None
             Speficiation of mask dilation.
-            If a callable, it should be a a neighborhood function 
-            (like Sphere(..)) that can map a single voxel coordinate 
+            If a callable, it should be a a neighborhood function
+            (like Sphere(..)) that can map a single voxel coordinate
             (represented as a triple of indices) to a list of voxel
             coordinates that define the neighboorhood of that
             coordinate. For example, Sphere(3) can be used to dilate the
-            original mask by 3 voxels. If an int, then it uses 
+            original mask by 3 voxels. If an int, then it uses
             Sphere(dilate) to dilate the mask. If set to None
-            the mask is not dilated. 
-            
+            the mask is not dilated.
+
         Returns
         -------
         msk: numpy.ndarray
             an array with values 1. for values inside the mask
             and values of 0 elsewhere. If the instance has no mask,
-            then all values are 1. 
+            then all values are 1.
         '''
 
         data_vec = np.zeros((self.nvoxels,), dtype=np.float32)
@@ -708,7 +690,7 @@ class VolGeom(object):
 
     def get_masked_nifti_image(self, nt=None, dilate=None):
         '''Provides a masked nifti image
-        
+
         Parameters
         ----------
         nt: int or None
@@ -717,21 +699,21 @@ class VolGeom(object):
             sample. If nt is None, then the output is 3D; otherwise
             it is 4D with 'nt' values in the last dimension.
         dilate: callable or int or None
-            If a callable, it should be a a neighborhood function 
-            (like Sphere(..)) that can map a single voxel coordinate 
+            If a callable, it should be a a neighborhood function
+            (like Sphere(..)) that can map a single voxel coordinate
             (represented as a triple of indices) to a list of voxel
             coordinates that define the neighboorhood of that
             coordinate. For example, Sphere(3) can be used to dilate the
-            original mask by 3 voxels. If an int, then it uses 
+            original mask by 3 voxels. If an int, then it uses
             Sphere(dilate) to dilate the mask. If set to None
-            the mask is not dilated.  
-            
+            the mask is not dilated.
+
         Returns
         -------
         msk: Nifti1image
             a nifti image with values 1. for values inside the mask
             and values of 0 elsewhere. If the instance has no mask,
-            then all values are 1. 
+            then all values are 1.
         '''
 
         data = self.get_masked_array(nt=nt, dilate=dilate)
@@ -740,10 +722,10 @@ class VolGeom(object):
 
 def from_any(s, mask_volume=None):
     """Constructs a VolGeom instance from any reasonable type of input.
-    
+
     Parameters
     ----------
-    s : str or VolGeom or nibabel SpatialImage-like or 
+    s : str or VolGeom or nibabel SpatialImage-like or
                 mvpa2.datasets.base.Dataset-like with nifti-image header.
         Input to use to construct the VolGeom instance. If s is a string,
         then it is assumed to refer to the file name of a NIFTI image.
@@ -751,13 +733,13 @@ def from_any(s, mask_volume=None):
         If an int is provided, then the mask-volume-th volume in s
         is used as a voxel mask. True is equivalent to 0. If None or
         False are provided, no mask is applied.
-        Fmri-dataset-like objects are treated specifally: If s is 
-        such an object an mask_volume is None, it will automatically use 
-        s.fa['voxel_indices'] to define the mask (if that attribute is 
-        present). Alternatively, if mask_volume is a string, then the 
+        Fmri-dataset-like objects are treated specifally: If s is
+        such an object an mask_volume is None, it will automatically use
+        s.fa['voxel_indices'] to define the mask (if that attribute is
+        present). Alternatively, if mask_volume is a string, then the
         mask is defined based on the voxel indices that are assumed
         to be present s.fa[mask_volume].
-    
+
     Returns
     -------
     vg: VolGeom
@@ -814,9 +796,18 @@ def from_any(s, mask_volume=None):
         try:
             # see if s behaves like a Dataset with image header
             hdr = s.a.imghdr
+            try:
+                shape = hdr.get_data_shape()
+                affine = hdr.get_best_affine()
+            except AttributeError:
+                # maybe there are shape and voxel dimensions
+                shape = s.a.voxel_dim
 
-            shape = hdr.get_data_shape()
-            affine = hdr.get_best_affine()
+                # set the affine matrix with origin (0,0,0)
+                affine = np.zeros((4, 4))
+                affine[0, 0], affine[1, 1], affine[2, 2] = s.a.voxel_eldim
+                affine[:2, -1] = -.5 * np.diag(affine)[:2]
+                affine[3, 3] = 1
 
             mask = None
             if isinstance(mask_volume, int):
@@ -884,7 +875,7 @@ def to_vector(v):
 
 def distance(p, q, r=2):
     '''Returns the distances between vectors in two arrays
-    
+
     Parameters
     ----------
     p: np.ndarray (PxM)
@@ -892,14 +883,26 @@ def distance(p, q, r=2):
     q: np.ndarray (QxM)
         second array
     nrm: float (default: 2)
-        Norm used for distance computation. By default Euclidian distances
+        Norm used for distance computation. By default Euclidean distances
         are computed.
-        
+
     Returns
     -------
     pq: np.ndarray (PxQ)
         Distance between p[j] and q[j] is in pq[i,j]
+
+    Notes
+    -----
+    If p or q are vectors (one-dimensional) then pq is also a vector
     '''
+    ravel = 0
+
+    if len(p.shape) == 1:
+        p = np.reshape(p, (1, -1))
+        ravel += 1
+    if len(q.shape) == 1:
+        q = np.reshape(q, (1, -1))
+        ravel += 1
 
     if p.shape[1] != q.shape[1]:
         raise ValueError("Shape mismatch")
@@ -917,4 +920,11 @@ def distance(p, q, r=2):
     for i, pi in enumerate(p):
         ds[i, :] = dist_func(pi, q, r)
 
+    if ravel > 0:
+        # we could also return just a single number if
+        # ravel==2 but for consistency always return an array
+        ds = ds.ravel()
     return ds
+
+
+

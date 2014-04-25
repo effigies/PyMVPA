@@ -11,7 +11,6 @@
 from mvpa2.testing import *
 skip_if_no_external('nibabel')
 
-
 import numpy as np
 from numpy.testing.utils import assert_array_almost_equal
 
@@ -32,9 +31,9 @@ from mvpa2.misc.surfing import volgeom, volsurf, \
                                 volume_mask_dict, surf_voxel_selection, \
                                 queryengine
 
-from mvpa2.support.nibabel import surf, surf_fs_asc
+from mvpa2.support.nibabel import surf, surf_fs_asc, surf_gifti
 
-from mvpa2.measures.searchlight import Searchlight
+from mvpa2.measures.searchlight import sphere_searchlight, Searchlight
 from mvpa2.misc.neighborhood import Sphere
 
 if externals.exists('h5py'):
@@ -49,7 +48,8 @@ class SurfTests(unittest.TestCase):
     'Ground truth' is whatever output is returned by the implementation
     as of mid-Aug 2012"""
 
-    def test_surf(self):
+    @with_tempfile('.asc', 'test_surf')
+    def test_surf(self, temp_fn):
         """Some simple testing with surfaces
         """
 
@@ -63,8 +63,6 @@ class SurfTests(unittest.TestCase):
 
         assert_true(v.shape == (102, 3))
         assert_true(f.shape == (200, 3))
-
-
 
         # another surface
         t = s * 10 + 2
@@ -112,7 +110,7 @@ class SurfTests(unittest.TestCase):
             x.faces[:, :] = 0
             return None
 
-        assert_raises(RuntimeError, assign_zero, s)
+        assert_raises((ValueError, RuntimeError), assign_zero, s)
 
         # see if mapping to high res works
         h = surf.generate_sphere(40)
@@ -138,7 +136,7 @@ class SurfTests(unittest.TestCase):
             assert_true(len(n2f[i]) in nf)
 
 
-        # test dijkstra disances
+        # test dijkstra distances
         ds2 = s.dijkstra_distance(2)
         some_ds = {0: 3.613173280799, 1: 0.2846296765, 2: 0.,
                  52: 1.87458018, 53: 2.0487004817, 54: 2.222820777,
@@ -148,11 +146,15 @@ class SurfTests(unittest.TestCase):
         for k, v in some_ds.iteritems():
             assert_true(abs(v - ds2[k]) < eps)
 
-        # test I/O (throught ascii files)
-        _, fn = tempfile.mkstemp('surf.asc', 'surftest')
-        surf.write(fn, s, overwrite=True)
-        s2 = surf.read(fn)
-        os.remove(fn)
+        # test I/O (through ascii files)
+        surf.write(temp_fn, s, overwrite=True)
+        s2 = surf.read(temp_fn)
+
+        # test i/o and ensure that the loaded instance is trained
+        if externals.exists('h5py'):
+            h5save(temp_fn, s2)
+            s2 = h5load(temp_fn)
+
 
         assert_array_almost_equal(s.vertices, s2.vertices, 4)
         assert_array_almost_equal(s.faces, s2.faces, 4)
@@ -164,15 +166,34 @@ class SurfTests(unittest.TestCase):
         assert_array_almost_equal(s3.vertices[-1, :], np.array([18., 19, 0.]))
         assert_array_almost_equal(s3.faces[-1, :], np.array([199, 198, 179]))
 
+        # test bar
+        p, q = (0, 0, 0), (100, 0, 0)
+        s4 = surf.generate_bar(p, q, 10, 12)
+        assert_equal(s4.nvertices, 26)
+        assert_equal(s4.nfaces, 48)
 
-    def test_surf_fs_asc(self):
+
+    def test_surf_border(self):
+        s = surf.generate_sphere(3)
+        assert_array_equal(s.nodes_on_border(), [False] * 11)
+
+        s = surf.generate_plane((0, 0, 0), (0, 1, 0), (1, 0, 0), 10, 10)
+        b = s.nodes_on_border()
+        v = s.vertices
+
+        vb = reduce(np.logical_or, [v[:, 0] == 0, v[:, 1] == 0,
+                                    v[:, 0] == 9, v[:, 1] == 9])
+
+        assert_array_equal(b, vb)
+
+        assert_true(s.nodes_on_border(0))
+
+    @with_tempfile('.asc', 'test_surf')
+    def test_surf_fs_asc(self, temp_fn):
         s = surf.generate_sphere(5) * 100
 
-        _, fn = tempfile.mkstemp('surf', 'test')
-        surf_fs_asc.write(fn, s, overwrite=True)
-
-        t = surf_fs_asc.read(fn)
-        os.remove(fn)
+        surf_fs_asc.write(temp_fn, s, overwrite=True)
+        t = surf_fs_asc.read(temp_fn)
 
         assert_array_almost_equal(s.vertices, t.vertices)
         assert_array_almost_equal(s.vertices, t.vertices)
@@ -181,7 +202,7 @@ class SurfTests(unittest.TestCase):
 
         r = s.rotate(theta, unit='deg')
 
-        l2r = surf_fs_asc.sphere_reg_leftrightmapping(s, r)
+        l2r = surf.get_sphere_left_right_mapping(s, r)
         l2r_expected = [0, 1, 2, 6, 5, 4, 3, 11, 10, 9, 8, 7, 15, 14, 13, 12,
                        16, 19, 18, 17, 21, 20, 23, 22, 26, 25, 24]
 
@@ -190,17 +211,19 @@ class SurfTests(unittest.TestCase):
 
         sides_facing = 'apism'
         for side_facing in sides_facing:
-            l, r = surf_fs_asc.hemi_pairs_reposition(s + 10., t + (-10.),
-                                                     side_facing)
+            l, r = surf.reposition_hemisphere_pairs(s + 10., t + (-10.),
+                                              side_facing)
 
             m = surf.merge(l, r)
 
-            # not sure at the moment why medial rotation 
+            # not sure at the moment why medial rotation
             # messes up - but leave for now
             eps = 666 if side_facing == 'm' else .001
             assert_true((abs(m.center_of_mass) < eps).all())
 
-    def test_volgeom(self):
+
+    @with_tempfile('.nii', 'test_vol')
+    def test_volgeom(self, temp_fn):
         sz = (17, 71, 37, 73) # size of 4-D 'brain volume'
         d = 2. # voxel size
         xo, yo, zo = -6., -12., -20. # origin
@@ -214,7 +237,7 @@ class SurfTests(unittest.TestCase):
 
         eq_shape_nvoxels = {(17, 71, 37): (True, True),
                            (71, 17, 37, 1): (False, True),
-                           (17, 71, 37, 2): (False, True),
+                           (17, 71, 37, 2): (True, True),
                             (17, 71, 37, 73): (True, True),
                            (2, 2, 2): (False, False)}
 
@@ -226,7 +249,6 @@ class SurfTests(unittest.TestCase):
         nv = sz[0] * sz[1] * sz[2] # number of voxels
         nt = sz[3] # number of time points
         assert_equal(vg.nvoxels, nv)
-        assert_equal(vg.ntimepoints, nt)
 
         # a couple of hard-coded test cases
         # last two are outside the volume
@@ -270,7 +292,7 @@ class SurfTests(unittest.TestCase):
         identities_input = [1, 2, 2, 0, 1, 0, 2, 0]
 
         # voxel indices to test
-        linrange = [0, 1, sz[2], sz[1] * sz[2]] + range(0, nv, nv / 100)
+        linrange = [0, 1, sz[2], sz[1] * sz[2]] + range(0, nv, nv // 100)
 
         lin = np.reshape(np.asarray(linrange), (-1,))
         ijk = vg.lin2ijk(lin)
@@ -310,13 +332,12 @@ class SurfTests(unittest.TestCase):
         # some I/O testing
 
         img = vg.get_empty_nifti_image()
-        _, fn = tempfile.mkstemp('.nii', 'test')
-        img.to_filename(fn)
+        img.to_filename(temp_fn)
 
-        assert_true(os.path.exists(fn))
+        assert_true(os.path.exists(temp_fn))
 
         vg2 = volgeom.from_any(img)
-        vg3 = volgeom.from_any(fn)
+        vg3 = volgeom.from_any(temp_fn)
 
         assert_array_equal(vg.affine, vg2.affine)
         assert_array_equal(vg.affine, vg3.affine)
@@ -324,9 +345,8 @@ class SurfTests(unittest.TestCase):
         assert_equal(vg.shape[:3], vg2.shape[:3], 0)
         assert_equal(vg.shape[:3], vg3.shape[:3], 0)
 
-        os.remove(fn)
-
         assert_true(len('%s%r' % (vg, vg)) > 0)
+
 
     def test_volgeom_masking(self):
         maskstep = 5
@@ -350,7 +370,7 @@ class SurfTests(unittest.TestCase):
         dset = fmri_dataset(data, mask=msk)
         vg_dset = volgeom.from_any(dset)
 
-        # ensure that the mask is set properly and 
+        # ensure that the mask is set properly and
         assert_equal(vg.nvoxels, vg.nvoxels_mask * maskstep ** 3)
         assert_equal(vg_dset, vg)
 
@@ -374,8 +394,8 @@ class SurfTests(unittest.TestCase):
 
                 # results should be identical irrespective of constr
                 if i == 0:
-                    # - first call with this value of dialte: has to be more 
-                    #   voxels than very previous dilation value, unless the 
+                    # - first call with this value of dilate: has to be more
+                    #   voxels than very previous dilation value, unless the
                     #   full volume is covered - then it can be equal too
                     # - every next call: ensure size matches
                     cmp = lambda x, y:(x >= y if covers_full_volume else x > y)
@@ -385,7 +405,7 @@ class SurfTests(unittest.TestCase):
                     # same size as previous call
                     assert_equal(n, nvoxels_masks[-1])
 
-                # if dilate is not None or zero, then it should 
+                # if dilate is not None or zero, then it should
                 # have selected all the voxels if the radius is big enough
                 assert_equal(np.sum(data) == vg.nvoxels, covers_full_volume)
 
@@ -399,22 +419,22 @@ class SurfTests(unittest.TestCase):
         inner = surf.generate_sphere(density) * 20. + 25
 
 
-        vs = volsurf.VolSurf(vg, outer, inner)
-
         # increasingly select more voxels in 'grey matter'
         steps_start_stop = [(1, .5, .5), (5, .5, .5), (3, .3, .7),
                           (5, .3, .7), (5, 0., 1.), (10, 0., 1.)]
+
 
         mp = None
         expected_keys = set(range(density ** 2 + 2))
         selection_counter = []
         voxel_counter = []
         for sp, sa, so in steps_start_stop:
-            n2v = vs.node2voxels(sp, sa, so)
+            vs = volsurf.VolSurfMaximalMapping(vg, outer, inner, (outer + inner) * .5, sp, sa, so)
+
+            n2v = vs.get_node2voxels_mapping()
 
             if mp is None:
                 mp = n2v
-
 
             assert_equal(expected_keys, set(n2v.keys()))
 
@@ -427,7 +447,7 @@ class SurfTests(unittest.TestCase):
                     counter += 1
 
             selection_counter.append(counter)
-            img = vs.voxel_count_nifti_image(n2v)
+            img = vs.voxel_count_nifti_image()
 
             voxel_counter.append(np.sum(img.get_data() > 0))
 
@@ -441,6 +461,26 @@ class SurfTests(unittest.TestCase):
         # check that string building works
         assert_true(len('%s%r' % (vs, vs)) > 0)
 
+
+    def test_volsurf_surf_from_volume(self):
+        aff = np.eye(4)
+        aff[0, 0] = aff[1, 1] = aff[2, 2] = 3
+
+        sh = (40, 40, 40)
+
+        vg = volgeom.VolGeom(sh, aff)
+
+        p = volsurf.from_volume(vg).intermediate_surface
+        q = volsurf.VolumeBasedSurface(vg)
+
+        centers = [0, 10, 10000, (-1, -1, -1), (5, 5, 5)]
+        radii = [0, 10, 20, 100]
+
+        for center in centers:
+            for radius in radii:
+                x = p.circlearound_n2d(center, radius)
+                y = q.circlearound_n2d(center, radius)
+                assert_equal(x, y)
 
 
     def test_volume_mask_dict(self):
@@ -488,7 +528,7 @@ class SurfTests(unittest.TestCase):
 
                     # index of node nearest to voxel i
                     src_anywhere = sel.target2nearest_source(i,
-                                            fallback_euclidian_distance=True)
+                                            fallback_euclidean_distance=True)
 
                     # coordinates of node nearest to voxel i
                     xyz_src = xyz[src_anywhere]
@@ -534,7 +574,6 @@ class SurfTests(unittest.TestCase):
                                  vg.contains_lin(lin_min))
 
 
-
     def test_surf_voxel_selection(self):
         vol_shape = (10, 10, 10)
         vol_affine = np.identity(4)
@@ -547,12 +586,12 @@ class SurfTests(unittest.TestCase):
         outer = surf.generate_sphere(density) * 25. + 15
         inner = surf.generate_sphere(density) * 20. + 15
 
-        vs = volsurf.VolSurf(vg, outer, inner)
+        vs = volsurf.VolSurfMaximalMapping(vg, outer, inner)
 
         nv = outer.nvertices
 
         # select under variety of parameters
-        # parameters are distance metric (dijkstra or euclidean), 
+        # parameters are distance metric (dijkstra or euclidean),
         # radius, and number of searchlight  centers
         params = [('d', 1., 10), ('d', 1., 50), ('d', 1., 100), ('d', 2., 100),
                   ('e', 2., 100), ('d', 2., 100), ('d', 20, 100),
@@ -568,7 +607,7 @@ class SurfTests(unittest.TestCase):
         tested_double_features = False
         for param in params:
             distance_metric, radius, ncenters = param
-            srcs = range(0, nv, nv / (ncenters or nv))
+            srcs = range(0, nv, nv // (ncenters or nv))
             sel = surf_voxel_selection.voxel_selection(vs, radius,
                                             source_surf_nodes=srcs,
                                             distance_metric=distance_metric)
@@ -589,7 +628,7 @@ class SurfTests(unittest.TestCase):
 
                 assert_true(len('%s%r' % (sel, sel)) > 0)
 
-                # see if voxels containing inner and outer 
+                # see if voxels containing inner and outer
                 # nodes were selected
                 for sf in [inner, outer]:
                     for k, idxs in mp.iteritems():
@@ -601,12 +640,13 @@ class SurfTests(unittest.TestCase):
 
                 # check that it has all the attributes
                 labs = sel.aux_keys()
+
                 assert_true(all([lab in labs for lab in expected_labs]))
 
 
                 if externals.exists('h5py'):
                     # some I/O testing
-                    _, fn = tempfile.mkstemp('.h5py', 'test')
+                    fd, fn = tempfile.mkstemp('.h5py', 'test'); os.close(fd)
                     h5save(fn, sel)
 
                     sel2 = h5load(fn)
@@ -621,9 +661,11 @@ class SurfTests(unittest.TestCase):
 
 
                 # test I/O with surfaces
-                _, outerfn = tempfile.mkstemp('outer.asc', 'test')
-                _, innerfn = tempfile.mkstemp('inner.asc', 'test')
-                _, volfn = tempfile.mkstemp('vol.nii', 'test')
+                # XXX the @tempfile decorator only supports a single filename
+                #     hence this method does not use it
+                fd, outerfn = tempfile.mkstemp('outer.asc', 'test'); os.close(fd)
+                fd, innerfn = tempfile.mkstemp('inner.asc', 'test'); os.close(fd)
+                fd, volfn = tempfile.mkstemp('vol.nii', 'test'); os.close(fd)
 
                 surf.write(outerfn, outer, overwrite=True)
                 surf.write(innerfn, inner, overwrite=True)
@@ -637,10 +679,10 @@ class SurfTests(unittest.TestCase):
 
                 outer4 = surf.read(outerfn)
                 inner4 = surf.read(innerfn)
-                vs4 = vs = volsurf.VolSurf(vg, inner4, outer4)
+                vsm4 = vs = volsurf.VolSurfMaximalMapping(vg, inner4, outer4)
 
                 # check that two ways of voxel selection match
-                sel4 = surf_voxel_selection.voxel_selection(vs4, radius,
+                sel4 = surf_voxel_selection.voxel_selection(vsm4, radius,
                                                     source_surf_nodes=srcs,
                                                     distance_metric=distance_metric)
 
@@ -685,10 +727,19 @@ class SurfTests(unittest.TestCase):
                                     # information about each near-disk-voxels
                                     add_fa=['center_distances',
                                             'grey_matter_position'])
+
+                # test i/o ensuring that when loading it is still trained
+                if externals.exists('h5py'):
+                    fd, qefn = tempfile.mkstemp('qe.hdf5', 'test'); os.close(fd)
+                    h5save(qefn, qe)
+                    qe = h5load(qefn)
+                    os.remove(qefn)
+
+
                 assert_false('ERROR' in repr(qe))   #  to check if repr works
                 voxelcounter = _Voxel_Count_Measure()
                 searchlight = Searchlight(voxelcounter, queryengine=qe, roi_ids=keys, nproc=1,
-                                          enable_ca=['roi_feature_ids'])
+                                          enable_ca=['roi_feature_ids', 'roi_center_ids'])
                 sl_dset = searchlight(dset)
 
                 selected_count = sl_dset.samples[0, :]
@@ -697,6 +748,10 @@ class SurfTests(unittest.TestCase):
                     # check that number of selected voxels matches
                     assert_equal(selected_count[i], len(mp[k]))
 
+
+                assert_equal(searchlight.ca.roi_center_ids, sel.keys())
+
+                assert_array_equal(sl_dset.fa['center_ids'], qe.ids)
 
                 # check nearest node is *really* the nearest node
 
@@ -718,9 +773,11 @@ class SurfTests(unittest.TestCase):
                     dset1.fa['dset'] = [1]
                     dset2 = dset.copy()
                     dset2.fa['dset'] = [2]
-                    dset_ = hstack((dset1, dset2))
+                    dset_ = hstack((dset1, dset2), 'drop_nonunique')
                     dset_.sa = dset1.sa
-                    dset_.a.imghdr = dset1.a.imghdr
+                    #dset_.a.imghdr = dset1.a.imghdr
+                    assert_true('imghdr' in dset_.a.keys())
+                    assert_equal(dset_.a['imghdr'].value, dset1.a['imghdr'].value)
                     roi_feature_ids = searchlight.ca.roi_feature_ids
                     sl_dset_ = searchlight(dset_)
                     # and we should get twice the counts
@@ -743,7 +800,6 @@ class SurfTests(unittest.TestCase):
         assert_equal(voxcount, expected_voxcount)
 
     def test_h5support(self):
-
         sh = (20, 20, 20)
         msk = np.zeros(sh)
         for i in xrange(0, sh[0], 2):
@@ -774,6 +830,268 @@ class SurfTests(unittest.TestCase):
             else:
                 assert_equal(sel0, sel)
 
+    def test_agreement_surface_volume(self):
+        '''test agreement between volume-based and surface-based
+        searchlights when using euclidean measure'''
+
+        #import runner
+        def sum_ds(ds):
+            return np.sum(ds)
+
+        radius = 3
+
+        # make a small dataset with a mask
+        sh = (10, 10, 10)
+        msk = np.zeros(sh)
+        for i in xrange(0, sh[0], 2):
+            msk[i, :, :] = 1
+        vg = volgeom.VolGeom(sh, np.identity(4), mask=msk)
+
+        # make an image
+        nt = 6
+        img = vg.get_masked_nifti_image(6)
+        ds = fmri_dataset(img, mask=msk)
+
+
+        # run the searchlight
+        sl = sphere_searchlight(sum_ds, radius=radius)
+        m = sl(ds)
+
+        # now use surface-based searchlight
+        v = volsurf.from_volume(ds)
+        source_surf = v.intermediate_surface
+        node_msk = np.logical_not(np.isnan(source_surf.vertices[:, 0]))
+
+        # check that the mask matches with what we used earlier
+        assert_array_equal(msk.ravel() + 0., node_msk.ravel() + 0.)
+
+        source_surf_nodes = np.nonzero(node_msk)[0]
+
+        sel = surf_voxel_selection.voxel_selection(v, float(radius),
+                                        source_surf=source_surf,
+                                        source_surf_nodes=source_surf_nodes,
+                                        distance_metric='euclidean')
+
+        qe = queryengine.SurfaceVerticesQueryEngine(sel)
+        sl = Searchlight(sum_ds, queryengine=qe)
+        r = sl(ds)
+
+        # check whether they give the same results
+        assert_array_equal(r.samples, m.samples)
+
+
+    @with_tempfile('.h5py', 'qe')
+    def test_surf_queryengine(self, qefn):
+        s = surf.generate_plane((0, 0, 0), (0, 1, 0), (0, 0, 1), 4, 5)
+
+        # add scond layer
+        s2 = surf.merge(s, (s + (.01, 0, 0)))
+
+        ds = Dataset(samples=np.arange(20)[np.newaxis],
+                    fa=dict(node_indices=np.arange(39, 0, -2)))
+
+        # add more features (with shared node indices)
+        ds3 = hstack((ds, ds, ds))
+
+        radius = 2.5
+
+        # Note: sweepargs it not used to avoid re-generating the same
+        #       surface and dataset multiple times.
+        for distance_metric in ('euclidean', 'dijkstra', '<illegal>', None):
+            builder = lambda: queryengine.SurfaceQueryEngine(s2, radius,
+                                                             distance_metric)
+            if distance_metric in ('<illegal>', None):
+                assert_raises(ValueError, builder)
+                continue
+
+            qe = builder()
+
+            # test i/o and ensure that the untrained instance is not trained
+            if externals.exists('h5py'):
+                fd, qefn = tempfile.mkstemp('qe.hdf5', 'test'); os.close(fd)
+                h5save(qefn, qe)
+                qe = h5load(qefn)
+                os.remove(qefn)
+
+
+            # untrained qe should give errors
+            assert_raises(ValueError, lambda:qe.ids)
+            assert_raises(ValueError, lambda:qe.query_byid(0))
+
+            # node index out of bounds should give error
+            ds_ = ds.copy()
+            ds_.fa.node_indices[0] = 100
+            assert_raises(ValueError, lambda: qe.train(ds_))
+
+            # lack of node indices should give error
+            ds_.fa.pop('node_indices')
+            assert_raises(ValueError, lambda: qe.train(ds_))
+
+
+            # train the qe
+            qe.train(ds3)
+
+            # test i/o and ensure that the loaded instance is trained
+            if externals.exists('h5py'):
+                h5save(qefn, qe)
+                qe = h5load(qefn)
+
+            for node in np.arange(-1, s2.nvertices + 1):
+                if node < 0 or node >= s2.nvertices:
+                    assert_raises(KeyError, lambda: qe.query_byid(node))
+                    continue
+
+                feature_ids = np.asarray(qe.query_byid(node))
+
+                # node indices relative to ds
+                base_ids = feature_ids[feature_ids < 20]
+
+                # should have multiples of 20
+                assert_equal(set(feature_ids),
+                             set((base_ids[np.newaxis].T + \
+                                            [0, 20, 40]).ravel()))
+
+
+
+                node_indices = list(s2.circlearound_n2d(node,
+                                    radius, distance_metric or 'dijkstra'))
+
+                fa_indices = [fa_index for fa_index, node in
+                                    enumerate(ds3.fa.node_indices)
+                                    if node in node_indices]
+
+
+                assert_equal(set(feature_ids), set(fa_indices))
+
+            # smoke tests
+            assert_true('SurfaceQueryEngine' in '%s' % qe)
+            assert_true('SurfaceQueryEngine' in '%r' % qe)
+
+
+    def test_surf_pairs(self):
+        o, x, y = map(np.asarray, [(0, 0, 0), (0, 1, 0), (1, 0, 0)])
+        d = np.asarray((0, 0, .1))
+        n = 10
+        s1 = surf.generate_plane(o, x, y, n, n)
+        s2 = surf.generate_plane(o + d, x, y, n, n)
+        s = surf.merge(s1, s2)
+
+        # try for small surface
+        eps = .0000001
+        pw = s.pairwise_near_nodes(.5)
+        for i in xrange(n ** 2):
+            d = pw.pop((i, i + 100))
+            assert_array_almost_equal(d, .1)
+
+        assert_true(len(pw) == 0)
+
+        pw = s.pairwise_near_nodes(.5)
+        for i in xrange(n ** 2):
+            d = pw.pop((i, i + 100))
+            assert_array_almost_equal(d, .1)
+
+        assert_true(len(pw) == 0)
+
+        # bigger one
+        pw = s.pairwise_near_nodes(1.4)
+        for i in xrange(n ** 2):
+            p, q = i // n, i % n
+            offsets = sum(([] if q == 0 else [-1],
+                         [] if q == n - 1 else [+1],
+                         [] if p == 0 else [-n],
+                         [] if p == n - 1 else [n],
+                         [0]), [])
+            for offset in offsets:
+                ii = i + offset + n ** 2
+                d = pw.pop((i, ii))
+
+            assert_true((d < .5) ^ (offset > 0))
+
+        assert_true(len(pw) == 0)
+
+    @with_tempfile('surf.surf.gii', 'surftest')
+    def test_surf_gifti(self, fn):
+            # From section 14.4 in GIFTI Surface Data Format Version 1.0
+            # (with some adoptions)
+
+            test_data = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE GIFTI SYSTEM "http://www.nitrc.org/frs/download.php/1594/gifti.dtd">
+<GIFTI
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://www.nitrc.org/frs/download.php/1303/GIFTI_Caret.xsd"
+  Version="1.0"
+  NumberOfDataArrays="2">
+<MetaData>
+  <MD>
+    <Name><![CDATA[date]]></Name>
+    <Value><![CDATA[Thu Nov 15 09:05:22 2007]]></Value>
+  </MD>
+</MetaData>
+<LabelTable/>
+<DataArray Intent="NIFTI_INTENT_POINTSET"
+  DataType="NIFTI_TYPE_FLOAT32"
+  ArrayIndexingOrder="RowMajorOrder"
+  Dimensionality="2"
+  Dim0="4"
+  Dim1="3"
+  Encoding="ASCII"
+  Endian="LittleEndian"
+  ExternalFileName=""
+  ExternalFileOffset="">
+<CoordinateSystemTransformMatrix>
+  <DataSpace><![CDATA[NIFTI_XFORM_TALAIRACH]]></DataSpace>
+  <TransformedSpace><![CDATA[NIFTI_XFORM_TALAIRACH]]></TransformedSpace>
+  <MatrixData>
+    1.000000 0.000000 0.000000 0.000000
+    0.000000 1.000000 0.000000 0.000000
+    0.000000 0.000000 1.000000 0.000000
+    0.000000 0.000000 0.000000 1.000000
+  </MatrixData>
+</CoordinateSystemTransformMatrix>
+<Data>
+  10.5 0 0
+  0 20.5 0
+  0 0 30.5
+  0 0 0
+</Data>
+</DataArray>
+<DataArray Intent="NIFTI_INTENT_TRIANGLE"
+  DataType="NIFTI_TYPE_INT32"
+  ArrayIndexingOrder="RowMajorOrder"
+  Dimensionality="2"
+  Dim0="4"
+  Dim1="3"
+  Encoding="ASCII"
+  Endian="LittleEndian"
+  ExternalFileName="" ExternalFileOffset="">
+<Data>
+0 1 2
+1 2 3
+0 1 3
+0 2 3
+</Data>
+</DataArray>
+</GIFTI>'''
+
+            with open(fn, 'w') as f:
+                f.write(test_data)
+
+            # test I/O
+            s = surf.read(fn)
+            surf.write(fn, s)
+            s = surf.read(fn)
+
+            v = np.zeros((4, 3))
+            v[0, 0] = 10.5
+            v[1, 1] = 20.5
+            v[2, 2] = 30.5
+
+            f = np.asarray([[0, 1, 2], [1, 2, 3], [0, 1, 3], [0, 2, 3]],
+                            dtype=np.int32)
+
+            assert_array_equal(s.vertices, v)
+            assert_array_equal(s.faces, f)
+
 
 
 
@@ -787,9 +1105,10 @@ class _Voxel_Count_Measure(Measure):
         return dset.nfeatures
 
 
-def suite():
+def suite():  # pragma: no cover
     """Create the suite"""
     return unittest.makeSuite(SurfTests)
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     import runner
+    runner.run()

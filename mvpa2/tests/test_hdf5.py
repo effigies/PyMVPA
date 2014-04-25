@@ -66,8 +66,8 @@ def test_h5py_datasets():
 def test_h5py_dataset_typecheck():
     ds = datasets['uni2small']
 
-    _, fpath = tempfile.mkstemp('mvpa', 'test')
-    _, fpath2 = tempfile.mkstemp('mvpa', 'test')
+    fd, fpath = tempfile.mkstemp('mvpa', 'test'); os.close(fd)
+    fd, fpath2 = tempfile.mkstemp('mvpa', 'test'); os.close(fd)
 
     h5save(fpath2, [[1, 2, 3]])
     assert_raises(ValueError, AttrDataset.from_hdf5, fpath2)
@@ -241,16 +241,21 @@ def test_state_setter_getter():
     # as it would be reconstructed before the fix -- obj array of obj arrays
     np.array([np.array([{'d': np.empty(shape=(2,3))}], dtype=object)],
              dtype=object),
+    np.array([],dtype='int64'),
     ))
 def test_save_load_object_dtype_ds(obj=None):
     """Test saving of custom object ndarray (GH #84)
     """
+    aobjf = np.asanyarray(obj).flatten()
+
+    if not aobjf.size and externals.versions['hdf5'] < '1.8.7':
+        raise SkipTest("Versions of hdf5 before 1.8.7 have problems with empty arrays")
+
     # print obj, obj.shape
     f = tempfile.NamedTemporaryFile()
 
     # save/reload
-    h5save(f.name, obj)
-    obj_ = h5load(f.name)
+    obj_ = saveload(obj, f.name)
 
     # and compare
     # neh -- not versatile enough
@@ -259,9 +264,148 @@ def test_save_load_object_dtype_ds(obj=None):
     assert_array_equal(obj.shape, obj_.shape)
     assert_equal(type(obj), type(obj_))
     # so we could test both ds and arrays
-    aobjf = np.asanyarray(obj).flatten()
     aobjf_ = np.asanyarray(obj_).flatten()
     # checks if having just array above
-    assert_equal(type(aobjf[0]), type(aobjf_[0]))
-    assert_array_equal(aobjf[0]['d'], aobjf_[0]['d'])
+    if aobjf.size:
+        assert_equal(type(aobjf[0]), type(aobjf_[0]))
+        assert_array_equal(aobjf[0]['d'], aobjf_[0]['d'])
 
+
+_python_objs = [
+    # lists
+    [1, 2], [],
+    # tuples
+    (1, 2), tuple(),
+    # pure Python sets
+    set([1,2]), set(), set([None]), set([tuple()]),
+    ]
+import collections
+_python_objs.append([collections.deque([1,2])])
+if hasattr(collections, 'OrderedDict'):
+    _python_objs.append([collections.OrderedDict(),
+                         collections.OrderedDict(a9=1, a0=2)])
+if hasattr(collections, 'Counter'):
+    _python_objs.append([collections.Counter({'red': 4, 'blue': 2})])
+
+@sweepargs(obj=_python_objs)
+def test_save_load_python_objs(obj):
+    """Test saving objects of various types
+    """
+    # print obj, obj.shape
+    f = tempfile.NamedTemporaryFile()
+
+    # save/reload
+    h5save(f.name, obj)
+    obj_ = h5load(f.name)
+
+    assert_equal(type(obj), type(obj_))
+    assert_equal(obj, obj_)
+
+def saveload(obj, f, backend='hdf5'):
+    """Helper to save/load using some of tested backends
+    """
+    if backend == 'hdf5':
+        h5save(f, obj)
+        #import os; os.system('h5dump %s' % f)
+        obj_ = h5load(f)
+    else:
+        #check pickle -- does it correctly
+        import cPickle
+        with open(f, 'w') as f_:
+            cPickle.dump(obj, f_)
+        with open(f) as f_:
+            obj_ = cPickle.load(f_)
+    return obj_
+
+# Test some nasty nested constructs of mutable beasts
+_nested_d = {0: 2}
+_nested_d[1] = {
+    0: {3: 4}, # to ease comprehension of the dump
+    1: _nested_d}
+_nested_d[1][2] = ['crap', _nested_d]   # 3rd level of nastiness
+
+_nested_l = [2, None]
+_nested_l[1] = [{3: 4}, _nested_l, None]
+_nested_l[1][2] = ['crap', _nested_l]   # 3rd level of nastiness
+
+@sweepargs(obj=[_nested_d, _nested_l])
+@sweepargs(backend=['hdf5', 'pickle'])
+@with_tempfile()
+def test_nested_obj(f, backend, obj):
+    ok_(obj[1][1] is obj)
+    obj_ = saveload(obj, f, backend=backend)
+    assert_equal(obj_[0], 2)
+    assert_equal(obj_[1][0], {3: 4})
+    ok_(obj_[1][1] is obj_)
+    ok_(obj_[1][1] is not obj)  # nobody does teleportation
+
+    # 3rd level
+    ok_(obj_[1][2][1] is obj_)
+
+_nested_a = np.array([1, 2], dtype=object)
+_nested_a[1] = {1: 0, 2: _nested_a}
+
+@sweepargs(a=[_nested_a])
+@sweepargs(backend=['hdf5', 'pickle'])
+@with_tempfile()
+def test_nested_obj_arrays(f, backend, a):
+    assert_equal(a.dtype, np.object)
+    a_ = saveload(a, f, backend=backend)
+    # import pydb; pydb.debugger()
+    ok_(a_[1][2] is a_)
+
+@sweepargs(backend=['hdf5','pickle'])
+@with_tempfile()
+def test_ca_col(f, backend):
+    from mvpa2.base.state import ConditionalAttributesCollection, ConditionalAttribute
+    c1 = ConditionalAttribute(name='ca1', enabled=True)
+    #c2 = ConditionalAttribute(name='test2', enabled=True)
+    col = ConditionalAttributesCollection([c1], name='whoknows')
+    col.ca1 = col # {0: c1, 1: [None, col]}  # nest badly
+    assert_true(col.ca1 is col)
+    col_ = saveload(col, f, backend=backend)
+    # seems to work niceish with pickle
+    #print col_, col_.ca1, col_.ca1.ca1, col_.ca1.ca1.ca1
+    assert_true(col_.ca1.ca1 is col_.ca1)
+    # but even there top-level assignment test fails, which means it creates two
+    # instances
+    if backend != 'pickle':
+        assert_true(col_.ca1 is col_)
+
+# regression tests for datasets which have been previously saved
+
+def test_reg_load_hyperalignment_example_hdf5():
+    from mvpa2 import pymvpa_datadbroot
+    filepath = os.path.join(pymvpa_datadbroot,
+                        'hyperalignment_tutorial_data',
+                        'hyperalignment_tutorial_data.hdf5.gz')
+    if not os.path.exists(filepath):
+        raise SkipTest("No hyperalignment tutorial data available under %s" %
+                       filepath)
+    ds_all = h5load(filepath)
+
+    ds = ds_all[0]
+    # First mapper was a FlattenMapper
+    flat_mapper = ds.a.mapper[0]
+    assert_equal(flat_mapper.shape, (61, 73, 61))
+    assert_equal(flat_mapper.pass_attr, None)
+    assert_false('ERROR' in str(flat_mapper))
+    ds_reversed = ds.a.mapper.reverse(ds)
+    assert_equal(ds_reversed.shape, (len(ds),) + flat_mapper.shape)
+
+@with_tempfile()
+def test_save_load_FlattenMapper(f):
+    from mvpa2.mappers.flatten import FlattenMapper
+    fm = FlattenMapper()
+    ds = datasets['3dsmall']
+    ds_ = fm(ds)
+    ds_r = fm.reverse(ds_)
+    fm_ = saveload(fm, f)
+    assert_equal(fm_.shape, fm.shape)
+
+@with_tempfile()
+def test_versions(f):
+    h5save(f, [])
+    hdf = h5py.File(f, 'r')
+    assert_equal(hdf.attrs.get('__pymvpa_hdf5_version__'), '2')
+    assert_equal(hdf.attrs.get('__pymvpa_version__'), mvpa2.__version__)

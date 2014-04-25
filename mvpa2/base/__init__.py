@@ -6,7 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Base functionality of PyMVPA
+"""Plumbing layer for PyMVPA
 
 Module Organization
 ===================
@@ -378,6 +378,9 @@ if __debug__:
                     self._newline = txt.endswith('\n')
                 finally:
                     self._inhere = False
+
+            def flush(self):
+                self.stdout.flush()
 
         _out = _pymvpa_stdout_debug(sys)
 

@@ -6,8 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""An efficient implementation of searchlight for GNB.
-"""
+"""Support functionality for GNB and M1NN searchlights"""
 
 __docformat__ = 'restructuredtext'
 
@@ -124,8 +123,8 @@ class SimpleStatBaseSearchlight(BaseSearchlight):
     some stats are not needed (eg per sample X^2's) for M1NN, so we
     should make them optional depending on the derived class
 
-    Note
-    ----
+    Notes
+    -----
 
     refactored from the original GNBSearchlight
 

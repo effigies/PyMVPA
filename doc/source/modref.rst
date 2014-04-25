@@ -38,6 +38,7 @@ Basic Facilities
    base.attributes
    base.collections
    base.config
+   base.constraints
    base.dochelpers
    base.externals
    base.hdf5
@@ -45,6 +46,7 @@ Basic Facilities
    base.learner
    base.node
    base.param
+   base.progress
    base.report
    base.state
    base.types
@@ -63,8 +65,10 @@ Datasets: Input, Output, Storage and Preprocessing
    datasets.eep
    datasets.formats
    datasets.mri
+   datasets.niml
+   datasets.eeglab
    datasets.miscfx
-   datasets.sources.sklearn_data
+   datasets.sources.skl_data
 
 
 Mappers: Data Transformations
@@ -81,14 +85,17 @@ Mappers: Data Transformations
    mappers.flatten
    mappers.fx
    mappers.fxy
+   mappers.glm
    mappers.lle
    mappers.mdp_adaptor
    mappers.procrustean
    mappers.projection
    mappers.prototype
    mappers.shape
+   mappers.skl_adaptor
    mappers.slicing
    mappers.som
+   mappers.staticprojection
    mappers.svd
    mappers.wavelet
    mappers.zscore
@@ -161,17 +168,14 @@ Measures: Searchlights and Sensitivties
 
    measures.base
    measures.anova
-   measures.corrcoef
-   measures.corrstability
-   measures.ds
    measures.irelief
    measures.noiseperturbation
-   measures.pls
-   measures.adhocsearchlightbase
    measures.gnbsearchlight
    measures.nnsearchlight
+   measures.rsa
    measures.searchlight
    measures.statsmodels_adaptor
+   measures.winner
 
 
 Feature Selection
@@ -202,9 +206,11 @@ Miscellaneous
    :toctree: generated
 
    atlases
+   atlases.base
+   atlases.fsl
+   atlases.warehouse
    misc.args
    misc.attrmap
-   misc.cmdline
    misc.data_generators
    misc.dcov
    misc.errorfx
@@ -243,9 +249,11 @@ Basic Plotting Utilities
 .. autosummary::
    :toctree: generated
 
+   viz
    misc.plot
    misc.plot.base
    misc.plot.erp
+   misc.plot.flat_surf
    misc.plot.lightbox
    misc.plot.topo
 
@@ -269,9 +277,12 @@ Basic Plotting Utilities
    support.nibabel
    support.nibabel.afni_niml_annot
    support.nibabel.afni_niml_dset
+   support.nibabel.afni_niml_roi
    support.nibabel.afni_niml
    support.nibabel.afni_suma_1d
    support.nibabel.afni_suma_spec
    support.nibabel.surf_fs_asc
+   support.nibabel.surf_caret
+   support.nibabel.surf_gifti
    support.nibabel.surf
    

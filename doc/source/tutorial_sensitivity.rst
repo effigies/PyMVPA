@@ -10,9 +10,9 @@
 .. index:: Tutorial
 .. _chap_tutorial_sensitivity:
 
-*********************************************************
-Part 6: Looking Without Searching -- Sensitivity Analysis
-*********************************************************
+*******************************************************
+Classification Model Parameters -- Sensitivity Analysis
+*******************************************************
 
 .. note::
 
@@ -20,13 +20,13 @@ Part 6: Looking Without Searching -- Sensitivity Analysis
   <http://ipython.org/ipython-doc/dev/interactive/htmlnotebook.html>`_:
   [`ipynb <notebooks/tutorial_sensitivity.ipynb>`_]
 
-In the :ref:`previous tutorial part <chap_tutorial_searchlight>` we made a
-first attempt to localize information in the brain that is relevant to a
-particular classification analyses. While we were relatively successful,
-we experienced some problems and also had to wait quite a bit. Here we want
-to look at another approach to localization. To get started, we pre-process
-the data as we have done before and perform volume averaging to get a
-single sample per stimulus category and original experiment session.
+In the :ref:`chap_tutorial_searchlight` we made a first attempt at localizing
+information in the brain that is relevant to a particular classification
+analyses. While we were relatively successful, we experienced some problems and
+also had to wait quite a bit. Here we want to look at another approach to
+localization. To get started, we pre-process the data as we have done before
+and perform volume averaging to get a single sample per stimulus category and
+original experiment session.
 
 >>> from mvpa2.tutorial_suite import *
 >>> # alt: `ds = load_tutorial_results('ds_haxby2001_blkavg_brain')`
@@ -45,16 +45,17 @@ single sample per stimulus category and original experiment session.
 
 .. h5save('results/ds_haxby2001_blkavg_brain.hdf5', ds)
 
-A searchlight analysis on this dataset would look exactly as we have seen
-:ref:`before <chap_tutorial_searchlight>`, but it would take a bit longer
-due to a higher number of samples. The error map that is the result of a
-searchlight analysis only offers an approximate localization. First, it is
-smeared by the overlapping spheres and second the sphere-shaped ROIs
-probably do not reflect the true shape and extent of functional subregions
-in the brain. Therefore, it mixes and matches things that might not belong
-together. It would be much nicer if we were able to obtain a
-per-feature measure, where each value can really be attributed to the
-respective feature and not just to an area surrounding it.
+A searchlight analysis on this dataset would look exactly as we have seen in
+:ref:`chap_tutorial_searchlight`, but it would take a bit longer due to a
+higher number of samples. The error map that is the result of a searchlight
+analysis only offers an approximate localization. First, it is smeared by the
+overlapping spheres and second the sphere-shaped ROIs probably do not reflect
+the true shape and extent of functional subregions in the brain. Therefore, it
+mixes and matches things that might not belong together. This can be mitigated
+to some degree by using more clever searchlight algorithms (see
+:ref:`example_searchlight_surf`).  But it would also be much nicer if we were
+able to obtain a per-feature measure, where each value can really be attributed
+to the respective feature and not just to an area surrounding it.
 
 .. _chap_magic_feature_selection:
 
@@ -65,7 +66,7 @@ One way to get such a measure is to inspect the classifier itself. Each
 classifier creates a model to map from the training data onto the
 respective target values. In this model, classifiers typically associate
 some sort of weight with each feature that is an indication of its impact
-on the classifiers decision. How we can get this information from a
+on the classifiers decision. How to get this information from a
 classifier will be the topic of this tutorial.
 
 However, if we want to inspect a trained classifier, we first have to train
@@ -107,15 +108,14 @@ that there is some signal in the data, hence we can attribute this failure
 to the classifier. In most situations it would be as likely that there is
 actually no signal in the data...
 
-Often people claim that classification performance improves with :term:`feature
-selection`. If we can reduce the dataset to the important ones, the
-classifier wouldn't have to deal with all the noise anymore. A simple
-approach would be to compute a full-brain ANOVA and only go with the
-voxels that show some level of variance between categories. From the
-:ref:`previous tutorial part <chap_tutorial_searchlight>` we know how to
-compute the desired F-scores and we could use them to manually select features
-with some threshold. However, PyMVPA offers a more convenient way --
-feature selectors:
+Often people claim that classification performance improves with
+:term:`feature selection`. If we can reduce the dataset to the important ones,
+the classifier wouldn't have to deal with all the noise anymore. A simple
+approach would be to compute a full-brain ANOVA and only go with the voxels
+that show some level of variance between categories. From the
+:ref:`chap_tutorial_searchlight` we know how to compute the desired F-scores
+and we could use them to manually select features with some threshold. However,
+PyMVPA offers a more convenient way -- feature selectors:
 
 >>> fsel = SensitivityBasedFeatureSelection(
 ...            OneWayAnova(),
@@ -137,8 +137,9 @@ This is the dataset we wanted, so we can rerun the cross-validation and see
 if it helped. But first, take a step back and look at this code snippet again.
 There is an object that gets called with a dataset and returns a dataset. You
 cannot prevent noticing the striking similarity between a measure in PyMVPA or
-a mapper. And yes, feature selection procedures are also :term:`processing
-object`\ s and work just like measures or mappers. Now back to the analysis:
+a mapper. And yes, feature selection procedures are also
+:term:`processing object`\ s and work just like measures or mappers. Now back
+to the analysis:
 
 >>> results = cvte(ds_p)
 >>> print np.round(cvte.ca.stats.stats['ACC%'], 1)
@@ -159,7 +160,7 @@ the ANOVA-selected features were the right ones.
 
 .. exercise::
 
-  If you are not yet screaming or started composing an email to the
+  If you are not yet screaming or haven't started composing an email to the
   PyMVPA mailing list pointing to a major problem in the tutorial, you need
   to reconsider what we have just done. Why is this wrong?
 
@@ -247,8 +248,8 @@ But now back to our original goal: getting the classifier's opinion about
 the importance of features in the dataset. With the approach we have used
 above, the classifier is trained on 500 features. We can only have its
 opinion about those. Although this is just few times larger than a typical
-searchlight sphere, we already have lifted the spatial constraint of
-searchlights -- these features can come from all over the brain.
+searchlight sphere, we have lifted the spatial constraint of
+searchlights -- these features can come from all over an ROI.
 
 However, we still want to consider more features, so we are changing the
 feature selection to retain more.
@@ -266,7 +267,7 @@ feature selection to retain more.
 A drop of 8% in accuracy on about 4 times the number of features. This time
 we asked for the top 5% of F-scores.
 
-But how do we get the weight, finally? In PyMVPA many classifiers
+But how do we get the weights, finally? In PyMVPA many classifiers
 are accompanied with so-called :term:`sensitivity analyzer`\ s. This is an
 object that knows how to get them from a particular classifier type (since
 each classification algorithm hides them in different places). To create
@@ -290,7 +291,7 @@ when called with a dataset.
 .. h5save('results/res_haxby2001_sens_5pANOVA.hdf5', sens)
 
 Why do we get 28 sensitivity maps from the classifier? The support vector
-machine is constructs a model for binary classification problems. To be able to deal
+machine constructs a model for binary classification problems. To be able to deal
 with this 8-category dataset, the data is internally split into all
 possible binary problems (there are exactly 28 of them). The sensitivities
 are extracted for all these partial problems.
@@ -303,7 +304,7 @@ are extracted for all these partial problems.
 If you are not interested in this level of detail, we can combine the maps
 into one, as we have done with dataset samples before. A feasible
 algorithm might be to take the per feature maximum of absolute
-sensitivities in any or the maps. The resulting map will be an indication
+sensitivities in any of the maps. The resulting map will be an indication
 of the importance of feature for *some* partial classification.
 
 >>> sens_comb = sens.get_mapped(maxofabs_sample())
@@ -316,13 +317,13 @@ of the importance of feature for *some* partial classification.
 
 .. map2nifti(ds, sens_comb).to_filename('results/res_haxby2001_sens_maxofabs_5pANOVA.nii.gz')
 
-You might have noticed some imperfection in our recent approach to compute
+You might have noticed some imperfection in our recent approach to computing
 a full-brain sensitivity map. We derived it from the full dataset, and not
-from cross-validation splits of the data. Rectifying it is easy with a
+from cross-validation splits of the data. Rectifying this is easy with a
 meta-measure. A meta-measure is analogous to a meta-classifier: a measure
 that takes a basic measure, adds a processing step to it and behaves like a
 measure itself. The meta-measure we want to use is
-:class:`~mvpa2.measures.base.SplitFeaturewiseMeasure`.
+:class:`~mvpa2.measures.base.RepeatedMeasure`.
 
 >>> # alt: `sens = load_tutorial_results('res_haxby2001_splitsens_5pANOVA')`
 >>> sensana = fclf.get_sensitivity_analyzer(postproc=maxofabs_sample())
@@ -336,7 +337,7 @@ measure itself. The meta-measure we want to use is
 We re-create our basic sensitivity analyzer, this time automatically
 applying the post-processing step that combines the sensitivity maps for
 all partial classifications. Finally, we plug it into the meta-measure that
-uses an :class:`~mvpa2.datasets.splitters.NFoldSplitter` to split the
+uses an :class:`~mvpa2.datasets.splitters.NFoldPartitioner` to split the
 dataset. Afterwards, we can run the analyzer and we get another dataset,
 this time with a sensitivity map per each cross-validation split.
 

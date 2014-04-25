@@ -97,7 +97,7 @@ smlrc_ext = Extension(
     'mvpa2.clfs.libsmlrc.smlrc',
     sources=[ 'mvpa2/clfs/libsmlrc/smlr.c' ],
     #library_dirs = library_dirs,
-    libraries=['m'],
+    libraries=['m'] if not sys.platform.startswith('win') else [],
     # extra_compile_args = ['-O0'],
     extra_link_args=extra_link_args,
     language='c')
@@ -109,6 +109,13 @@ if bind_libsvm:
 
 # Notes on the setup
 # Version scheme is: major.minor.patch<suffix>
+
+def get_full_dir(path):
+    path_split = path.split('/') # so we could run setup.py on any platform
+    path_proper = os.path.join(*path_split)
+    return (path_proper,
+            [f for f in glob(os.path.join(path_proper, '*'))
+             if os.path.isfile(f)])
 
 # define the setup
 def setup_package():
@@ -127,7 +134,7 @@ def setup_package():
     sys.path.insert(0, src_path)
 
     setup(name='pymvpa2',
-          version='2.2.0',
+          version='2.3.0',
           author='Michael Hanke, Yaroslav Halchenko, Per B. Sederberg',
           author_email='pkg-exppsy-pymvpa@lists.alioth.debian.org',
           license='MIT License',
@@ -151,11 +158,13 @@ def setup_package():
                            'mvpa2.clfs.libsvmc',
                            'mvpa2.clfs.skl',
                            'mvpa2.clfs.sg',
+                           'mvpa2.cmdline',
                            'mvpa2.datasets',
                            'mvpa2.datasets.sources',
                            'mvpa2.featsel',
                            'mvpa2.kernels',
                            'mvpa2.mappers',
+                           'mvpa2.mappers.glm',
                            'mvpa2.generators',
                            'mvpa2.measures',
                            'mvpa2.misc',
@@ -171,17 +180,17 @@ def setup_package():
                            'mvpa2.support.nipy',
                            'mvpa2.support.ipython',
                            'mvpa2.support.nibabel',
+                           'mvpa2.support.scipy',
                            'mvpa2.testing',
                            'mvpa2.tests',
                            'mvpa2.tests.badexternals',
+                           'mvpa2.viz',
                            ],
           data_files=[('mvpa2', ['mvpa2/COMMIT_HASH']),
-                        ('mvpa2/data',
-                         [f for f in glob(os.path.join('mvpa2', 'data', '*'))
-                             if os.path.isfile(f)]),
-                        ('mvpa2/data/bv',
-                         [f for f in glob(os.path.join('mvpa2', 'data', 'bv', '*'))
-                             if os.path.isfile(f)])],
+                        get_full_dir('mvpa2/data'),
+                        get_full_dir('mvpa2/data/bv'),
+                        get_full_dir('mvpa2/data/tutorial_data_25mm/data'),
+          ],
           scripts=glob(os.path.join('bin', '*')),
           ext_modules=ext_modules
           )

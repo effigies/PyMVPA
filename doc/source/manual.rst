@@ -12,9 +12,11 @@ PyMVPA User Manual
    support
    tutorial
    examples
+   cmdline
    misc
    faq
    glossary
    changelog
    references
+   modref
    legal

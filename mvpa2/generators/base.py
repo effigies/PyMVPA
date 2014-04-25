@@ -6,7 +6,7 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Generators for dataset resampling."""
+"""Repeat and filter as sequence of dataset"""
 
 __docformat__ = 'restructuredtext'
 
@@ -59,8 +59,8 @@ class Repeater(Node):
 class Sifter(Node):
     """Exclude (do not generate) provided dataset on the values of the attributes.
 
-    Example
-    -------
+    Examples
+    --------
 
     Typical usecase: it is necessary to generate all possible
     combinations of two chunks while being interested only in the
