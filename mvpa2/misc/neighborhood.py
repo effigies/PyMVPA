@@ -378,7 +378,7 @@ class JSONQueryEngine(object):
 
     def save(self):
         if not hasattr(self, 'cache') or \
-                max(map(len,self.cache)) == 0:
+                max(map(len, self.cache)) == 0:
             return
         with open(self.fname, 'w') as fp:
             json.dump(self.cache, fp)
@@ -422,7 +422,7 @@ class SurfaceDiskQueryEngine(object):
 
     @classmethod
     def loadFromFiles(cls, radius, lvtxvols, lhsurf, rvtxvols, rhsurf,
-            mask=None):
+                      mask=None):
 
         if isinstance(lvtxvols, basestring):
             lvtxvols = [lvtxvols]
@@ -494,7 +494,8 @@ class DoubleDiskQueryEngine(SurfaceDiskQueryEngine):
         self._setFirstDisk()
 
     def _setFirstDisk(self):
-        self.firstDisk = super(DoubleDiskQueryEngine, self).__getitem__(self.coordinate)
+        self.firstDisk = super(DoubleDiskQueryEngine, self).__getitem__(
+            self.coordinate)
         self.fdset = set(self.firstDisk)
 
     @property
