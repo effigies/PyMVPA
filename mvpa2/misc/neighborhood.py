@@ -352,15 +352,12 @@ class SurfaceDiskQueryEngine(object):
     such that G[i][j] is the distance between connected nodes i and j
     3) Coordinates of vertices in Euclidean space
     """
-    def __init__(self, radius, lverts, lgraph, lcoords,
-                               rverts, rgraph, rcoords):
+    def __init__(self, radius, lverts, lgraph, rverts, rgraph):
         self._radius = radius
         self.lverts = lverts
         self.rverts = rverts
         self.lgraph = lgraph
         self.rgraph = rgraph
-        self.lcoords = lcoords
-        self.rcoords = rcoords
 
         self.lvox = [set(np.nonzero(lv.samples[0] != -1)[0].tolist())
                      for lv in lverts]
@@ -394,26 +391,26 @@ class SurfaceDiskQueryEngine(object):
         lverts = [fmri_dataset(vol, mask=mask) for vol in lvtxvols]
         rverts = [fmri_dataset(vol, mask=mask) for vol in rvtxvols]
 
-        # Standard freesurfer [lr]h.* files
-        lcoords, lfaces = nib.freesurfer.read_geometry(lhsurf)
-        rcoords, rfaces = nib.freesurfer.read_geometry(rhsurf)
-
         def buildGraph(coords, faces):
             """Build a bidirectional graph with Euclidean distances as edges"""
             graph = nx.Graph()
-            
-            euclid = lambda x, y: np.sqrt(np.sum((x - y) ** 2))
+
+            def norm(x, y):
+                diff = x - y
+                return np.sqrt(diff.dot(diff))
+
             for i, j, k in faces:
-                graph.add_edge(i, j, weight=euclid(coords[i, :], coords[j, :]))
-                graph.add_edge(i, k, weight=euclid(coords[i, :], coords[k, :]))
-                graph.add_edge(j, k, weight=euclid(coords[j, :], coords[k, :]))
+                graph.add_edge(i, j, weight=norm(coords[i, :], coords[j, :]))
+                graph.add_edge(i, k, weight=norm(coords[i, :], coords[k, :]))
+                graph.add_edge(j, k, weight=norm(coords[j, :], coords[k, :]))
 
             return graph
 
-        lgraph = buildGraph(lcoords, lfaces)
-        rgraph = buildGraph(rcoords, rfaces)
+        # Build graphs from standard FreeSurfer [lr]h.* files
+        lgraph = buildGraph(*nib.freesurfer.read_geometry(lhsurf))
+        rgraph = buildGraph(*nib.freesurfer.read_geometry(rhsurf))
 
-        return cls(radius, lverts, lgraph, lcoords, rverts, rgraph, rcoords)
+        return cls(radius, lverts, lgraph, rverts, rgraph)
 
     def train(self, dataset):
         self.ids = np.arange(dataset.nfeatures)
@@ -469,9 +466,8 @@ class DoubleDiskQueryEngine(SurfaceDiskQueryEngine):
             self._setFirstDisk()
 
     def getSingleDisk(self):
-        return SurfaceDiskQueryEngine(self._radius,
-                                      self.lverts, self.lgraph, self.lcoords,
-                                      self.rverts, self.rgraph, self.rcoords)
+        return SurfaceDiskQueryEngine(self._radius, self.lverts, self.lgraph,
+                                      self.rverts, self.rgraph)
 
     def __getitem__(self, coordinate):
         secondDisk = super(DoubleDiskQueryEngine, self).__getitem__(coordinate)
