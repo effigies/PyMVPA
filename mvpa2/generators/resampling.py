@@ -12,6 +12,7 @@ __docformat__ = 'restructuredtext'
 
 import time
 import random
+import threading
 
 import numpy as np
 
@@ -38,6 +39,7 @@ class Balancer(Node):
                  limit='chunks',
                  apply_selection=False,
                  include_offlimit=False,
+                 seed=None,
                  space='balanced_set',
                  **kwargs):
         """
@@ -86,7 +88,8 @@ class Balancer(Node):
         self._limit_filter = None
         self._include_offlimit = include_offlimit
         self._apply_selection = apply_selection
-
+        self._random = random.Random(seed)
+        self._randstates = [self._random.getstate()]
 
     def _call(self, ds):
         # local binding
@@ -141,8 +144,8 @@ class Balancer(Node):
             # select determined number of elements per unique attribute value
             selected = []
             for ua in uattr_limited:
-                selected += random.sample(list((attr_limited == ua).nonzero()[0]),
-                                          epa[ua])
+                selected += self._random.sample(
+                    list((attr_limited == ua).nonzero()[0]), epa[ua])
 
             # determine the final indices of selected elements and store
             # as part of the balanced set
@@ -187,12 +190,12 @@ class Balancer(Node):
                         "This should never happen!")
             return out
 
-
     def generate(self, ds):
         """Generate the desired number of balanced datasets datasets."""
         # figure out filter for all runs at once
         attr, collection = ds.get_attr(self._attr)
         self._limit_filter = get_limit_filter(self._limit, collection)
+        self._random.setstate(self._randstates[0])
         # permute as often as requested
         for i in xrange(self.count):
             yield self(ds)
@@ -221,6 +224,7 @@ class LogExclusions(Node):
         """
         Node.__init__(self, space=space, **kwargs)
         self._fname = fname
+        self._loglock = threading.Lock()
         # Truncate at start, append otherwise, to avoid holding an open
         # filehandle throughout execution
         if not append:
@@ -246,11 +250,13 @@ class LogExclusions(Node):
                     "Don't know where this collection comes from. "
                     "This should never happen!")
 
-        with open(self._fname, 'a') as fobj:
-            fobj.write('# New entry {}\n'.format(time.ctime()))
-            for entry in desc:
-                fobj.write(','.join(map(str, entry)))
-                fobj.write('\n')
+        with self._loglock:
+            marker = '{:x}'.format(random.SystemRandom().getrandbits(28))
+            with open(self._fname, 'a') as fobj:
+                fobj.write('# {} New entry {}\n'.format(marker, time.ctime()))
+                for entry in desc:
+                    fobj.write('{} {}\n'.format(marker,
+                                                ','.join(map(str, entry))))
 
         return ds
 
