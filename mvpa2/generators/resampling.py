@@ -11,6 +11,7 @@
 __docformat__ = 'restructuredtext'
 
 import numpy as np
+import threading
 
 from mvpa2.base.node import Node
 from mvpa2.base.dochelpers import _str, _repr
@@ -90,6 +91,7 @@ class Balancer(Node):
         self._include_offlimit = include_offlimit
         self._apply_selection = apply_selection
         self._rng = rng
+        self._rnglock = threading.RLock()
         self.__rng = None  # will be used within _call but could be initialized
                            # within generate
 
@@ -108,52 +110,57 @@ class Balancer(Node):
         # ids of elements that are part of the balanced set
         balanced_set = []
         full_limit_set = []
-        rng = self.__rng or get_rng(self._rng)
+        with self._rnglock:
+            rng = self.__rng or get_rng(self._rng)
 
-        # for each chunk in the filter (might be just the selected ones)
-        for limit_value in np.unique(limit_filter):
-            if limit_filter.dtype == np.bool:
-                # simple boolean filter -> do nothing on False
-                if not limit_value:
-                    continue
-                # otherwise get indices of "selected ones"
-                limit_idx = limit_filter.nonzero()[0]
-            else:
-                # non-boolean limiter -> determine "chunk" and balance within
-                limit_idx = (limit_filter == limit_value).nonzero()[0]
-            full_limit_set += list(limit_idx)
+            # for each chunk in the filter (might be just the selected ones)
+            for limit_value in np.unique(limit_filter):
+                if limit_filter.dtype == np.bool:
+                    # simple boolean filter -> do nothing on False
+                    if not limit_value:
+                        continue
+                    # otherwise get indices of "selected ones"
+                    limit_idx = limit_filter.nonzero()[0]
+                else:
+                    # non-boolean limiter -> determine "chunk", balance within
+                    limit_idx = (limit_filter == limit_value).nonzero()[0]
+                full_limit_set += list(limit_idx)
 
-            # apply the current limit to the target attribute
-            # need list to index properly
-            attr_limited = attr[list(limit_idx)]
-            uattr_limited = np.unique(attr_limited)
+                # apply the current limit to the target attribute
+                # need list to index properly
+                attr_limited = attr[list(limit_idx)]
+                uattr_limited = np.unique(attr_limited)
 
-            # handle all types of supported arguments
-            if amount == 'equal':
-                # go for maximum possible number of samples provided
-                # by each label in this dataset
-                # determine the min number of samples per class
-                epa = get_nelements_per_value(attr_limited)
-                min_epa = min(epa.values())
-                for k in epa:
-                    epa[k] = min_epa
-            elif isinstance(amount, float):
-                epa = get_nelements_per_value(attr_limited)
-                for k in epa:
-                    epa[k] = int(round(epa[k] * amount))
-            elif isinstance(amount, int):
-                epa = dict(zip(uattr_limited, [amount] * len(uattr_limited)))
-            else:
-                raise ValueError("Unknown type of amount argument '%s'" % amount)
+                # handle all types of supported arguments
+                if amount == 'equal':
+                    # go for maximum possible number of samples provided
+                    # by each label in this dataset
+                    # determine the min number of samples per class
+                    epa = get_nelements_per_value(attr_limited)
+                    min_epa = min(epa.values())
+                    for k in epa:
+                        epa[k] = min_epa
+                elif isinstance(amount, float):
+                    epa = get_nelements_per_value(attr_limited)
+                    for k in epa:
+                        epa[k] = int(round(epa[k] * amount))
+                elif isinstance(amount, int):
+                    epa = dict(zip(uattr_limited,
+                                   [amount] * len(uattr_limited)))
+                else:
+                    raise ValueError("Unknown type of amount argument '%s'" %
+                                     amount)
 
-            # select determined number of elements per unique attribute value
-            selected = []
-            for ua in uattr_limited:
-                selected += rng.permutation((attr_limited == ua).nonzero()[0])[:epa[ua]].tolist()
+                # select determined number of elements per unique attribute
+                # value
+                selected = []
+                for ua in uattr_limited:
+                    selected += rng.permutation(
+                        (attr_limited == ua).nonzero()[0])[:epa[ua]].tolist()
 
-            # determine the final indices of selected elements and store
-            # as part of the balanced set
-            balanced_set += list(limit_idx[selected])
+                # determine the final indices of selected elements and store
+                # as part of the balanced set
+                balanced_set += list(limit_idx[selected])
 
         # make full-sized boolean selection attribute and put it into
         # the right collection of the output dataset
@@ -203,10 +210,14 @@ class Balancer(Node):
         try:
             # _call might need to operate on the dedicated instantiated rng
             # e.g. if seed int is provided
-            self.__rng = get_rng(self._rng)
+            rng = get_rng(self._rng)
             # permute as often as requested
             for i in xrange(self.count):
-                yield self(ds)
+                with self._rnglock:
+                    self.__rng = rng
+                    out = self(ds)
+                    self.__rng = None
+                yield out
         finally:
             self.__rng = None
 
